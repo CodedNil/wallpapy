@@ -2,8 +2,11 @@ use super::super::PORT;
 use super::networking::{generate_wallpaper, login};
 use crate::{client::networking::get_gallery, common::WallpaperData};
 use anyhow::Result;
-use chrono::{DateTime, Utc};
-use egui::{Align2, CentralPanel, Color32, Context, Frame, ScrollArea, TextEdit, Vec2, Window};
+use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
+use egui::{
+    vec2, Align2, CentralPanel, Color32, Context, FontId, Frame, ScrollArea, Shape, TextEdit, Vec2,
+    Window,
+};
 use egui_notify::Toasts;
 use egui_pull_to_refresh::PullToRefresh;
 use egui_thumbhash::ThumbhashImage;
@@ -127,20 +130,19 @@ impl Wallpapy {
                 let refresh_response = PullToRefresh::new(false).scroll_area_ui(ui, |ui| {
                     ScrollArea::vertical().show(ui, |ui| {
                         for chunk in wallpapers.chunks(columns) {
+                            let mut chunk_height: f32 = 0.0;
+                            for wallpaper in chunk {
+                                let scale = image_width / wallpaper.width as f32;
+                                let height = wallpaper.height as f32 * scale;
+                                chunk_height = chunk_height.max(height);
+                            }
                             ui.horizontal(|ui| {
                                 for wallpaper in chunk {
-                                    let scale = image_width / wallpaper.width as f32;
-                                    ui.add_sized(
-                                        Vec2::new(image_width, wallpaper.height as f32 * scale),
-                                        ThumbhashImage::new(
-                                            egui::Image::new(&format!(
-                                                "http://{}/wallpapers/{}",
-                                                self.host, wallpaper.file_name
-                                            )),
-                                            &wallpaper.thumbhash,
-                                        )
-                                        .id(format!("gallery_item_{}", wallpaper.id).into())
-                                        .rounding(8.0),
+                                    self.draw_wallpaper_box(
+                                        ui,
+                                        wallpaper,
+                                        image_width,
+                                        chunk_height,
                                     );
                                 }
                             });
@@ -156,6 +158,79 @@ impl Wallpapy {
                 }
             }
         });
+    }
+
+    fn draw_wallpaper_box(
+        &self,
+        ui: &mut egui::Ui,
+        wallpaper: &WallpaperData,
+        width: f32,
+        height: f32,
+    ) {
+        let image_rect = ui
+            .add_sized(
+                Vec2::new(width, height),
+                ThumbhashImage::new(
+                    egui::Image::new(&format!(
+                        "http://{}/wallpapers/{}",
+                        self.host, wallpaper.file_name
+                    )),
+                    &wallpaper.thumbhash,
+                )
+                .id(format!("gallery_item_{}", wallpaper.id).into())
+                .rounding(16.0),
+            )
+            .rect;
+
+        // Add delete button in top-right corner
+        let delete_button_size = vec2(20.0, 20.0);
+        let delete_button_rect = egui::Rect::from_min_size(
+            image_rect.right_top() - vec2(delete_button_size.x + 5.0, -5.0),
+            delete_button_size,
+        );
+        let delete_button = ui.allocate_rect(delete_button_rect, egui::Sense::click());
+        if delete_button.clicked() {
+            println!("Delete wallpaper: {:?}", wallpaper.id);
+        }
+
+        // Start painting
+        let painter = ui.painter();
+
+        // Draw date in top-left corner
+        let datetime_text = NaiveDateTime::parse_from_str(&wallpaper.datetime, "%Y-%m-%d_%H-%M-%S")
+            .ok()
+            .map(|naive_dt| {
+                Utc.from_utc_datetime(&naive_dt)
+                    .format("%d/%m/%Y %H:%M")
+                    .to_string()
+            })
+            .unwrap_or_default();
+        let datetime_scale = 12.0;
+
+        let datetime_galley = painter.layout_no_wrap(
+            datetime_text,
+            FontId::proportional(datetime_scale),
+            Color32::WHITE.gamma_multiply(0.8),
+        );
+        let datetime_rect = egui::Align2::LEFT_TOP.anchor_size(
+            image_rect.left_top() + vec2(20.0, 20.0),
+            datetime_galley.size(),
+        );
+        painter.add(Shape::rect_filled(
+            datetime_rect.expand(datetime_scale * 0.5),
+            datetime_scale,
+            Color32::from_black_alpha(200),
+        ));
+        painter.galley(datetime_rect.min, datetime_galley, Color32::WHITE);
+
+        // Paint delete button
+        painter.text(
+            delete_button_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "X",
+            FontId::proportional(14.0),
+            Color32::WHITE,
+        );
     }
 
     fn get_gallery(&mut self) {
