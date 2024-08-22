@@ -30,7 +30,6 @@ egui_extras = { version = "0.28.1", features = [
     "http",
     "image",
 ], optional = true }
-egui_infinite_scroll = { version = "0.4.0", optional = true }
 egui_pull_to_refresh = { version = "0.5.0", optional = true }
 egui_thumbhash = { version = "0.4.0", optional = true }
 
@@ -63,7 +62,6 @@ gui = [
     "egui-notify",
     "ehttp",
     "egui_extras",
-    "egui_infinite_scroll",
     "egui_pull_to_refresh",
     "egui_thumbhash",
 ]

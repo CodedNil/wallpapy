@@ -1,11 +1,12 @@
 use super::super::PORT;
-use super::gallery::Gallery;
 use super::networking::{generate_wallpaper, login};
 use crate::{client::networking::get_gallery, common::WallpaperData};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use egui::{Align2, CentralPanel, Color32, Context, Frame, TextEdit, Window};
+use egui::{Align2, CentralPanel, Color32, Context, Frame, ScrollArea, TextEdit, Vec2, Window};
 use egui_notify::Toasts;
+use egui_pull_to_refresh::PullToRefresh;
+use egui_thumbhash::ThumbhashImage;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
@@ -16,7 +17,6 @@ nestify::nest! {
         toasts: Arc<Mutex<Toasts>>,
 
         gallery: Option<(Vec<WallpaperData>, DateTime<Utc>)>,
-        gallery_ui: Gallery,
 
         #>[derive(Deserialize, Serialize, Default)]
         #>[serde(default)]
@@ -57,7 +57,6 @@ impl Wallpapy {
             host: format!("localhost:{PORT}"),
             toasts: Arc::new(Mutex::new(Toasts::default())),
             gallery: None,
-            gallery_ui: Gallery::new(vec![]),
             stored,
             login_form: LoginForm {
                 username: String::new(),
@@ -119,7 +118,43 @@ impl Wallpapy {
 
         egui_extras::install_image_loaders(ctx);
         egui::CentralPanel::default().show(ctx, |ui| {
-            self.gallery_ui.show(ui, &self.host);
+            if let Some((wallpapers, _)) = &self.gallery {
+                let available_width = ui.available_width();
+                let image_width = 400.0;
+                let columns = (available_width / image_width).floor().max(1.0) as usize;
+                let image_width = available_width / columns as f32;
+
+                let refresh_response = PullToRefresh::new(false).scroll_area_ui(ui, |ui| {
+                    ScrollArea::vertical().show(ui, |ui| {
+                        for chunk in wallpapers.chunks(columns) {
+                            ui.horizontal(|ui| {
+                                for wallpaper in chunk {
+                                    let scale = image_width / wallpaper.width as f32;
+                                    ui.add_sized(
+                                        Vec2::new(image_width, wallpaper.height as f32 * scale),
+                                        ThumbhashImage::new(
+                                            egui::Image::new(&format!(
+                                                "http://{}/wallpapers/{}",
+                                                self.host, wallpaper.file_name
+                                            )),
+                                            &wallpaper.thumbhash,
+                                        )
+                                        .id(format!("gallery_item_{}", wallpaper.id).into())
+                                        .rounding(8.0),
+                                    );
+                                }
+                            });
+                        }
+                    })
+                });
+                if refresh_response.should_refresh() {
+                    let network_store = self.network_data.clone();
+                    network_store.lock().get_gallery = GetGalleryState::InProgress;
+                    get_gallery(&self.host, move |res| {
+                        network_store.lock().get_gallery = GetGalleryState::Done(res);
+                    });
+                }
+            }
         });
     }
 
@@ -141,7 +176,6 @@ impl Wallpapy {
                     Ok(gallery) => {
                         let datetime = Utc::now();
                         self.gallery = Some((gallery.clone(), datetime));
-                        self.gallery_ui = Gallery::new(gallery.clone());
                     }
                     Err(e) => {
                         log::error!("Failed to fetch galleries: {:?}", e);
