@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+
+    <!-- Disable zooming: -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+
+    <head>
+        <title>Wallpapy</title>
+
+        <!-- config for our rust wasm binary. go to https://trunkrs.dev/assets/#rust for more customization -->
+        <link data-trunk rel="rust" data-wasm-opt="3" />
+        <!-- this is the base url relative to which other urls will be constructed. trunk will insert this from the public-url option -->
+        <base data-trunk-public-url />
+
+        <link data-trunk rel="icon" href="assets/favicon.ico" />
+
+        <link data-trunk rel="copy-file" href="assets/manifest.json" />
+        <link data-trunk rel="copy-file" href="assets/icon-512.png" />
+        <link data-trunk rel="copy-file" href="assets/icon-256.png" />
+
+        <link rel="manifest" href="manifest.json" />
+
+        <style>
+            /* Allow canvas to fill entire web page: */
+            html,
+            body {
+                background: #404040;
+                touch-action: manipulation;
+                overflow: hidden;
+                margin: 0 !important;
+                padding: 0 !important;
+                height: 100%;
+                width: 100%;
+            }
+
+            /* Position canvas in center-top: */
+            canvas {
+                margin-right: auto;
+                margin-left: auto;
+                display: block;
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+            }
+        </style>
+    </head>
+
+    <body>
+        <!-- The WASM code will resize the canvas dynamically -->
+        <!-- the id is hardcoded in main.rs . so, make sure both match. -->
+        <canvas id="wallpapy_canvas"></canvas>
+    </body>
+</html>
+
+<!-- Powered by egui: https://github.com/emilk/egui/ -->

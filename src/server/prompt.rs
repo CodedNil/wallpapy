@@ -11,7 +11,7 @@ pub async fn generate() -> Result<String> {
         .max_tokens(4096u32)
         .model("gpt-4o")
         .messages([ChatCompletionRequestUserMessageArgs::default()
-            .content("Prompt for an image for a wallpaper in two sentences, fantasy landscape")
+            .content("Prompt for an image for a wallpaper in two sentences")
             .build()?
             .into()])
         .build()?;

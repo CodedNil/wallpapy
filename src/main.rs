@@ -1,41 +1,81 @@
-mod image;
-mod prompt;
+#![allow(clippy::too_many_lines)]
 
-use anyhow::{anyhow, Result};
-use serde::{Deserialize, Serialize};
+mod common;
 
-const DATABASE_PATH: &str = "database";
-const IMAGES_TREE: &str = "images";
+#[cfg(feature = "gui")]
+mod client;
 
-#[derive(Debug, Serialize, Deserialize)]
-struct ImageData {
-    prompt: String,
-    image_path: String,
-}
+#[cfg(not(target_arch = "wasm32"))]
+mod server;
 
+pub static PORT: u16 = 4560;
+
+#[cfg(not(target_arch = "wasm32"))]
 #[tokio::main]
 async fn main() {
-    dotenvy::dotenv().unwrap();
-    create_wallpaper().await.unwrap();
+    dotenvy::dotenv().ok();
+    simple_logger::SimpleLogger::new()
+        .with_level(log::LevelFilter::Info)
+        .init()
+        .unwrap();
+
+    // Set up router
+    let app = server::routing::setup_routes(
+        axum::Router::new()
+            .nest_service("/", tower_http::services::ServeDir::new("dist"))
+            .nest_service(
+                "/wallpapers",
+                tower_http::services::ServeDir::new("wallpapers"),
+            )
+            .layer(tower_http::compression::CompressionLayer::new()),
+    );
+
+    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], PORT));
+    println!("Listening on {addr}");
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+
+    #[cfg(not(feature = "gui"))]
+    axum::serve(listener, app).await.unwrap();
+
+    #[cfg(feature = "gui")]
+    {
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let native_options = eframe::NativeOptions {
+            viewport: egui::ViewportBuilder::default()
+                .with_inner_size([400.0, 300.0])
+                .with_min_inner_size([300.0, 220.0])
+                .with_icon(
+                    eframe::icon_data::from_png_bytes(
+                        &include_bytes!("../assets/icon-256.png")[..],
+                    )
+                    .unwrap(),
+                ),
+            ..Default::default()
+        };
+        let _ = eframe::run_native(
+            "Wallpapy",
+            native_options,
+            Box::new(|cc| Ok(Box::new(client::app::Wallpapy::new(cc)))),
+        );
+    }
 }
 
-async fn create_wallpaper() -> Result<()> {
-    let prompt = prompt::generate().await?;
-    let image_path = image::generate(&prompt).await?;
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    eframe::WebLogger::init(log::LevelFilter::Info).ok(); // Redirect `log` message to `console.log`
 
-    let db = sled::open(DATABASE_PATH).map_err(|e| anyhow!("Failed to open database: {:?}", e))?;
-    let tree = db
-        .open_tree(IMAGES_TREE)
-        .map_err(|e| anyhow!("Failed to open tree: {:?}", e))?;
+    let web_options = eframe::WebOptions::default();
 
-    // Store a new database entry with datetime as key and image_path and prompt
-    let datetime = chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
-    let image_data = ImageData {
-        prompt: prompt.clone(),
-        image_path,
-    };
-    tree.insert(datetime.as_bytes(), bincode::serialize(&image_data)?)
-        .map_err(|e| anyhow!("Failed to insert into tree: {:?}", e))?;
-
-    Ok(())
+    wasm_bindgen_futures::spawn_local(async {
+        eframe::WebRunner::new()
+            .start(
+                "wallpapy_canvas",
+                web_options,
+                Box::new(|cc| Ok(Box::new(client::app::Wallpapy::new(cc)))),
+            )
+            .await
+            .expect("failed to start eframe");
+    });
 }
