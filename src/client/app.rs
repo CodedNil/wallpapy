@@ -4,8 +4,8 @@ use crate::{client::networking::get_gallery, common::WallpaperData};
 use anyhow::Result;
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use egui::{
-    vec2, Align2, CentralPanel, Color32, Context, FontId, Frame, ScrollArea, Shape, TextEdit, Vec2,
-    Window,
+    vec2, Align2, CentralPanel, Color32, Context, CursorIcon, FontId, Frame, PointerButton,
+    ScrollArea, Shape, TextEdit, Vec2, Window,
 };
 use egui_notify::Toasts;
 use egui_pull_to_refresh::PullToRefresh;
@@ -85,6 +85,10 @@ impl eframe::App for Wallpapy {
         ctx.style_mut(|style| {
             style.visuals.window_shadow = egui::epaint::Shadow::NONE;
         });
+
+        let mut fonts = egui::FontDefinitions::default();
+        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+        ctx.set_fonts(fonts);
 
         if self.gallery.is_none() {
             self.get_gallery();
@@ -182,18 +186,8 @@ impl Wallpapy {
             )
             .rect;
 
-        // Add delete button in top-right corner
-        let delete_button_size = vec2(20.0, 20.0);
-        let delete_button_rect = egui::Rect::from_min_size(
-            image_rect.right_top() - vec2(delete_button_size.x + 5.0, -5.0),
-            delete_button_size,
-        );
-        let delete_button = ui.allocate_rect(delete_button_rect, egui::Sense::click());
-        if delete_button.clicked() {
-            println!("Delete wallpaper: {:?}", wallpaper.id);
-        }
-
         // Start painting
+        let ui_scale = 12.0;
         let painter = ui.painter();
 
         // Draw date in top-left corner
@@ -205,11 +199,10 @@ impl Wallpapy {
                     .to_string()
             })
             .unwrap_or_default();
-        let datetime_scale = 12.0;
 
         let datetime_galley = painter.layout_no_wrap(
             datetime_text,
-            FontId::proportional(datetime_scale),
+            FontId::proportional(ui_scale),
             Color32::WHITE.gamma_multiply(0.8),
         );
         let datetime_rect = egui::Align2::LEFT_TOP.anchor_size(
@@ -217,20 +210,87 @@ impl Wallpapy {
             datetime_galley.size(),
         );
         painter.add(Shape::rect_filled(
-            datetime_rect.expand(datetime_scale * 0.5),
-            datetime_scale,
-            Color32::from_black_alpha(200),
+            datetime_rect.expand(ui_scale * 0.5),
+            ui_scale,
+            Color32::BLACK.gamma_multiply(0.8),
         ));
         painter.galley(datetime_rect.min, datetime_galley, Color32::WHITE);
 
-        // Paint delete button
+        // Add delete button in top-right corner
+        let delete_button_size = vec2(ui_scale.mul_add(2.0, 2.0), ui_scale.mul_add(2.0, 2.0));
+        let delete_button_rect = egui::Align2::RIGHT_TOP.anchor_size(
+            image_rect.right_top() + vec2(-20.0, 20.0),
+            delete_button_size,
+        );
+        painter.add(Shape::rect_filled(
+            delete_button_rect,
+            ui_scale,
+            Color32::DARK_RED.gamma_multiply(0.8),
+        ));
         painter.text(
             delete_button_rect.center(),
             egui::Align2::CENTER_CENTER,
-            "X",
-            FontId::proportional(14.0),
+            egui_phosphor::regular::X,
+            FontId::proportional(ui_scale),
             Color32::WHITE,
         );
+        // Check if the cursor is hovering over the delete button
+        if ui.rect_contains_pointer(delete_button_rect) {
+            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+            if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
+                println!("Delete wallpaper: {:?}", wallpaper.id);
+            }
+        }
+
+        // Add thumbs down button left of delete
+        let thumbs_down_button_rect = egui::Align2::RIGHT_TOP.anchor_size(
+            delete_button_rect.left_top() + vec2(-10.0, 0.0),
+            delete_button_size,
+        );
+        painter.add(Shape::rect_filled(
+            thumbs_down_button_rect,
+            ui_scale,
+            Color32::BLACK.gamma_multiply(0.8),
+        ));
+        painter.text(
+            thumbs_down_button_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            egui_phosphor::regular::THUMBS_DOWN,
+            FontId::proportional(ui_scale),
+            Color32::WHITE,
+        );
+        // Check if the cursor is hovering over the thumbs_down button
+        if ui.rect_contains_pointer(thumbs_down_button_rect) {
+            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+            if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
+                println!("Thumbs down wallpaper: {:?}", wallpaper.id);
+            }
+        }
+
+        // Add thumbs up button left of thumbs down
+        let thumbs_up_button_rect = egui::Align2::RIGHT_TOP.anchor_size(
+            thumbs_down_button_rect.left_top() + vec2(-10.0, 0.0),
+            delete_button_size,
+        );
+        painter.add(Shape::rect_filled(
+            thumbs_up_button_rect,
+            ui_scale,
+            Color32::BLACK.gamma_multiply(0.8),
+        ));
+        painter.text(
+            thumbs_up_button_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            egui_phosphor::regular::THUMBS_UP,
+            FontId::proportional(ui_scale),
+            Color32::WHITE,
+        );
+        // Check if the cursor is hovering over the thumbs_up button
+        if ui.rect_contains_pointer(thumbs_up_button_rect) {
+            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+            if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
+                println!("Thumbs up wallpaper: {:?}", wallpaper.id);
+            }
+        }
     }
 
     fn get_gallery(&mut self) {
