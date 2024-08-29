@@ -1,20 +1,17 @@
-use super::{auth::verify_token, prompt, DATABASE_PATH};
-use crate::common::{TokenPacket, WallpaperData};
+use crate::common::{CommentData, GetWallpapersResponse, LikedState, TokenPacket, WallpaperData};
+use crate::server::{auth::verify_token, prompt, COMMENTS_TREE, DATABASE_PATH, IMAGES_TREE};
 use anyhow::{anyhow, Result};
-use async_openai::{
-    types::{CreateImageRequestArgs, Image, ImageModel, ImageSize, ResponseFormat},
-    Client,
-};
 use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
-use base64::{prelude::BASE64_STANDARD, Engine};
-use chrono::Utc;
-use image::GenericImageView;
+use image::{DynamicImage, GenericImageView, ImageReader};
+use serde_json::json;
+use std::env;
 use std::path::Path;
 use thumbhash::rgba_to_thumb_hash;
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use tokio::fs;
 use uuid::Uuid;
 
-const IMAGES_TREE: &str = "images";
+const TIMEOUT: u64 = 40;
 
 pub async fn generate_wallpaper(packet: Bytes) -> impl IntoResponse {
     let packet: TokenPacket = match bincode::deserialize(&packet) {
@@ -39,59 +36,46 @@ pub async fn generate_wallpaper(packet: Bytes) -> impl IntoResponse {
 }
 
 pub async fn get_wallpapers() -> impl IntoResponse {
-    let db = match sled::open(DATABASE_PATH) {
-        Ok(db) => db,
-        Err(e) => {
-            return {
-                log::error!("{:?}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
+    match sled::open(DATABASE_PATH)
+        .and_then(|db| Ok((db.clone(), db.open_tree(IMAGES_TREE)?)))
+        .and_then(|(db, images_tree)| Ok((images_tree, db.open_tree(COMMENTS_TREE)?)))
+    {
+        Ok((images_tree, comments_tree)) => {
+            let images: Vec<WallpaperData> = images_tree
+                .iter()
+                .values()
+                .filter_map(|v| v.ok().and_then(|bytes| bincode::deserialize(&bytes).ok()))
+                .collect();
+            let comments: Vec<CommentData> = comments_tree
+                .iter()
+                .values()
+                .filter_map(|v| v.ok().and_then(|bytes| bincode::deserialize(&bytes).ok()))
+                .collect();
+
+            match bincode::serialize(&GetWallpapersResponse { images, comments }) {
+                Ok(data) => return (StatusCode::OK, data).into_response(),
+                Err(e) => log::error!("{:?}", e),
             }
-            .into_response()
         }
-    };
-    let tree = match db.open_tree(IMAGES_TREE) {
-        Ok(tree) => tree,
-        Err(e) => {
-            return {
-                log::error!("{:?}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
-            }
-            .into_response()
-        }
+        Err(e) => log::error!("{:?}", e),
     };
 
-    let images: Vec<WallpaperData> = tree
-        .iter()
-        .values()
-        .filter_map(|v| v.ok().and_then(|bytes| bincode::deserialize(&bytes).ok()))
-        .collect();
-
-    match bincode::serialize(&images) {
-        Ok(data) => (StatusCode::OK, data).into_response(),
-        Err(e) => {
-            log::error!("{:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
-        .into_response(),
-    }
+    StatusCode::INTERNAL_SERVER_ERROR.into_response()
 }
 
 async fn generate_wallpaper_impl() -> Result<()> {
     log::info!("Generating wallpaper");
 
     let id = Uuid::new_v4();
-    let datetime = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+    let datetime = OffsetDateTime::now_utc();
 
     // Generate image
     let prompt = prompt::generate().await?;
-    let img_data = generate(&prompt).await?;
-
-    // Decode the image data to get dimensions and get in RGBA format
-    let img = image::load_from_memory(&img_data)?;
-    let (width, height) = img.dimensions();
+    let image = generate(&prompt).await?;
+    let (width, height) = image.dimensions();
 
     // Resize the image to thumbnail
-    let thumbnail = img.thumbnail(32, 32);
+    let thumbnail = image.thumbnail(32, 32);
     let thumbhash = rgba_to_thumb_hash(
         thumbnail.width() as usize,
         thumbnail.height() as usize,
@@ -101,8 +85,8 @@ async fn generate_wallpaper_impl() -> Result<()> {
     // Save to file
     let dir = Path::new("wallpapers");
     fs::create_dir_all(dir).await?;
-    let file_name = format!("{datetime}.jpg");
-    fs::write(&dir.join(&file_name), img_data).await?;
+    let file_name = format!("{}.jpg", &datetime.format(&Rfc3339)?);
+    image.save(dir.join(&file_name))?;
 
     let image_data = WallpaperData {
         id,
@@ -112,6 +96,7 @@ async fn generate_wallpaper_impl() -> Result<()> {
         width,
         height,
         thumbhash,
+        vote_state: LikedState::None,
     };
 
     // Store a new database entry
@@ -125,33 +110,62 @@ async fn generate_wallpaper_impl() -> Result<()> {
     Ok(())
 }
 
-async fn generate(prompt: &str) -> Result<Vec<u8>> {
-    let client = Client::new();
+async fn generate(prompt: &str) -> Result<DynamicImage> {
+    let client = reqwest::Client::new();
 
+    let api_token =
+        env::var("REPLICATE_API_TOKEN").expect("REPLICATE_API_TOKEN environment variable not set");
     let response = client
-        .images()
-        .create(
-            CreateImageRequestArgs::default()
-                .prompt(prompt)
-                .n(1)
-                .model(ImageModel::DallE3)
-                .response_format(ResponseFormat::B64Json)
-                .size(ImageSize::S1792x1024)
-                .user("wallpapy")
-                .build()?,
-        )
+        .post("https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions")
+        .header("Authorization", format!("Bearer {api_token}"))
+        .header("Content-Type", "application/json")
+        .json(&json!({
+            "input": {
+                "prompt": prompt,
+                "num_outputs": 1,
+                "aspect_ratio": "16:9",
+                "output_format": "png",
+                "output_quality": 80
+            }
+        }))
+        .send()
         .await?;
 
-    let b64_json = response
-        .data
-        .first()
-        .and_then(|arc_image| match **arc_image {
-            Image::B64Json { ref b64_json, .. } => Some(b64_json),
-            Image::Url { .. } => None,
-        })
-        .ok_or_else(|| anyhow!("No valid image data found"))?;
+    let response_json = response.json::<serde_json::Value>().await?;
+    let status_url = response_json["urls"]["get"]
+        .as_str()
+        .ok_or_else(|| anyhow!("No valid status URL found"))?;
 
-    let img_data = BASE64_STANDARD.decode(&**b64_json)?;
+    let mut image_url = None;
+    for _ in 0..TIMEOUT {
+        let status_response = client
+            .get(status_url)
+            .header("Authorization", format!("Bearer {api_token}"))
+            .header("Content-Type", "application/json")
+            .send()
+            .await?;
+        let status_json = status_response.json::<serde_json::Value>().await?;
 
-    Ok(img_data)
+        if let Some(output) = status_json["output"].as_array() {
+            if let Some(url) = output.first().and_then(|v| v.as_str()) {
+                image_url = Some(url.to_string());
+                break;
+            }
+        }
+
+        if status_json["status"] == "succeeded" {
+            break;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+
+    let image_url = image_url.ok_or_else(|| anyhow!("Image generation timed out or failed"))?;
+    let img_data = client.get(&image_url).send().await?.bytes().await?;
+
+    let img = ImageReader::new(std::io::Cursor::new(img_data))
+        .with_guessed_format()?
+        .decode()?;
+
+    Ok(img)
 }

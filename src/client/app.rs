@@ -1,8 +1,8 @@
 use super::super::PORT;
 use super::networking::{generate_wallpaper, login};
+use crate::common::{CommentData, GetWallpapersResponse};
 use crate::{client::networking::get_gallery, common::WallpaperData};
 use anyhow::Result;
-use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use egui::{
     vec2, Align2, CentralPanel, Color32, Context, CursorIcon, FontId, Frame, PointerButton,
     ScrollArea, Shape, TextEdit, Vec2, Window,
@@ -13,13 +13,15 @@ use egui_thumbhash::ThumbhashImage;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
+use time::{format_description, OffsetDateTime};
 
 nestify::nest! {
     pub struct Wallpapy {
         host: String,
         toasts: Arc<Mutex<Toasts>>,
 
-        gallery: Option<(Vec<WallpaperData>, DateTime<Utc>)>,
+        gallery: Option<(Vec<WallpaperData>, OffsetDateTime)>,
+        comments: Option<(Vec<CommentData>, OffsetDateTime)>,
 
         #>[derive(Deserialize, Serialize, Default)]
         #>[serde(default)]
@@ -41,10 +43,11 @@ nestify::nest! {
                 Done(Result<String>),
             },
             get_gallery: enum GetGalleryState {
-                #[default]
                 None,
+                #[default]
+                Wanted,
                 InProgress,
-                Done(Result<Vec<WallpaperData>>),
+                Done(Result<GetWallpapersResponse>),
             },
         }>>,
     }
@@ -60,6 +63,7 @@ impl Wallpapy {
             host: format!("localhost:{PORT}"),
             toasts: Arc::new(Mutex::new(Toasts::default())),
             gallery: None,
+            comments: None,
             stored,
             login_form: LoginForm {
                 username: String::new(),
@@ -90,9 +94,7 @@ impl eframe::App for Wallpapy {
         egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
         ctx.set_fonts(fonts);
 
-        if self.gallery.is_none() {
-            self.get_gallery();
-        }
+        self.get_gallery();
         if self.stored.auth_token.is_empty() {
             self.show_login_panel(ctx);
         } else {
@@ -110,11 +112,29 @@ impl Wallpapy {
                 ui.label("Welcome to Wallpapy!");
 
                 if ui.button("Generate Wallpaper").clicked() {
-                    self.toasts
+                    let toasts_store = self.toasts.clone();
+                    let network_store = self.network_data.clone();
+                    toasts_store
                         .lock()
                         .info("Generating Wallpaper")
                         .set_duration(Some(Duration::from_secs(2)));
-                    generate_wallpaper(&self.host, &self.stored.auth_token, move |_| {});
+                    generate_wallpaper(&self.host, &self.stored.auth_token, move |result| {
+                        match result {
+                            Ok(()) => {
+                                toasts_store
+                                    .lock()
+                                    .success("Generated Wallpaper")
+                                    .set_duration(Some(Duration::from_secs(2)));
+                                network_store.lock().get_gallery = GetGalleryState::Wanted;
+                            }
+                            Err(_) => {
+                                toasts_store
+                                    .lock()
+                                    .error("Failed to save layout")
+                                    .set_duration(Some(Duration::from_secs(2)));
+                            }
+                        }
+                    });
                 }
 
                 if ui.button("Logout").clicked() {
@@ -125,41 +145,36 @@ impl Wallpapy {
 
         egui_extras::install_image_loaders(ctx);
         egui::CentralPanel::default().show(ctx, |ui| {
-            if let Some((wallpapers, _)) = &self.gallery {
-                let available_width = ui.available_width();
-                let image_width = 400.0;
-                let columns = (available_width / image_width).floor().max(1.0) as usize;
-                let image_width = available_width / columns as f32;
+            let wallpapers = self
+                .gallery
+                .as_ref()
+                .map(|(w, _)| w.clone())
+                .unwrap_or_default();
 
-                let refresh_response = PullToRefresh::new(false).scroll_area_ui(ui, |ui| {
-                    ScrollArea::vertical().show(ui, |ui| {
-                        for chunk in wallpapers.chunks(columns) {
-                            let mut chunk_height: f32 = 0.0;
-                            for wallpaper in chunk {
-                                let scale = image_width / wallpaper.width as f32;
-                                let height = wallpaper.height as f32 * scale;
-                                chunk_height = chunk_height.max(height);
-                            }
-                            ui.horizontal(|ui| {
-                                for wallpaper in chunk {
-                                    self.draw_wallpaper_box(
-                                        ui,
-                                        wallpaper,
-                                        image_width,
-                                        chunk_height,
-                                    );
-                                }
-                            });
+            let available_width = ui.available_width();
+            let image_width = 400.0;
+            let columns = (available_width / image_width).floor().max(1.0) as usize;
+            let image_width = available_width / columns as f32;
+
+            let refresh_response = PullToRefresh::new(false).scroll_area_ui(ui, |ui| {
+                ScrollArea::vertical().show(ui, |ui| {
+                    for chunk in wallpapers.chunks(columns) {
+                        let mut chunk_height: f32 = 0.0;
+                        for wallpaper in chunk {
+                            let scale = image_width / wallpaper.width as f32;
+                            let height = wallpaper.height as f32 * scale;
+                            chunk_height = chunk_height.max(height);
                         }
-                    })
-                });
-                if refresh_response.should_refresh() {
-                    let network_store = self.network_data.clone();
-                    network_store.lock().get_gallery = GetGalleryState::InProgress;
-                    get_gallery(&self.host, move |res| {
-                        network_store.lock().get_gallery = GetGalleryState::Done(res);
-                    });
-                }
+                        ui.horizontal(|ui| {
+                            for wallpaper in chunk {
+                                self.draw_wallpaper_box(ui, wallpaper, image_width, chunk_height);
+                            }
+                        });
+                    }
+                })
+            });
+            if refresh_response.should_refresh() {
+                self.get_gallery();
             }
         });
     }
@@ -191,14 +206,8 @@ impl Wallpapy {
         let painter = ui.painter();
 
         // Draw date in top-left corner
-        let datetime_text = NaiveDateTime::parse_from_str(&wallpaper.datetime, "%Y-%m-%d_%H-%M-%S")
-            .ok()
-            .map(|naive_dt| {
-                Utc.from_utc_datetime(&naive_dt)
-                    .format("%d/%m/%Y %H:%M")
-                    .to_string()
-            })
-            .unwrap_or_default();
+        let format = format_description::parse("[day]/[month]/[year] [hour]:[minute]").unwrap();
+        let datetime_text = wallpaper.datetime.format(&format).unwrap();
 
         let datetime_galley = painter.layout_no_wrap(
             datetime_text,
@@ -297,7 +306,9 @@ impl Wallpapy {
         let network_store = self.network_data.clone();
         let mut network_data_guard = network_store.lock();
         match &network_data_guard.get_gallery {
-            GetGalleryState::None => {
+            GetGalleryState::InProgress | GetGalleryState::None => {}
+            GetGalleryState::Wanted => {
+                log::info!("Fetching gallery");
                 network_data_guard.get_gallery = GetGalleryState::InProgress;
                 drop(network_data_guard);
 
@@ -305,12 +316,12 @@ impl Wallpapy {
                     network_store.lock().get_gallery = GetGalleryState::Done(res);
                 });
             }
-            GetGalleryState::InProgress => {}
             GetGalleryState::Done(ref response) => {
                 match response {
-                    Ok(gallery) => {
-                        let datetime = Utc::now();
-                        self.gallery = Some((gallery.clone(), datetime));
+                    Ok(wallpapers) => {
+                        let datetime = OffsetDateTime::now_utc();
+                        self.gallery = Some((wallpapers.images.clone(), datetime));
+                        self.comments = Some((wallpapers.comments.clone(), datetime));
                     }
                     Err(e) => {
                         log::error!("Failed to fetch galleries: {:?}", e);

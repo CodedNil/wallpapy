@@ -1,4 +1,4 @@
-use crate::common::{LoginPacket, TokenPacket, WallpaperData};
+use crate::common::{GetWallpapersResponse, LoginPacket, TokenPacket};
 use anyhow::Result;
 
 pub fn login(
@@ -55,7 +55,10 @@ pub fn generate_wallpaper(
     );
 }
 
-pub fn get_gallery(host: &str, on_done: impl 'static + Send + FnOnce(Result<Vec<WallpaperData>>)) {
+pub fn get_gallery(
+    host: &str,
+    on_done: impl 'static + Send + FnOnce(Result<GetWallpapersResponse>),
+) {
     ehttp::fetch(
         ehttp::Request::get(&format!("http://{host}/get")),
         Box::new(move |res: std::result::Result<ehttp::Response, String>| {
