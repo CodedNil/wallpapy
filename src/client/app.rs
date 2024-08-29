@@ -1,13 +1,14 @@
-use crate::common::{CommentData, DatabaseObjectType, GetWallpapersResponse};
-use crate::PORT;
 use crate::{
-    client::networking::{add_comment, generate_wallpaper, get_gallery, login},
-    common::WallpaperData,
+    client::networking::{
+        add_comment, generate_wallpaper, get_gallery, like_image, login, remove_image,
+    },
+    common::{CommentData, DatabaseObjectType, GetWallpapersResponse, LikedState, WallpaperData},
+    PORT,
 };
 use anyhow::Result;
 use egui::{
     vec2, Align2, CentralPanel, Color32, Context, CursorIcon, FontId, Frame, PointerButton,
-    ScrollArea, Shape, TextEdit, Vec2, Window,
+    ScrollArea, Sense, Shape, TextEdit, Vec2, Window,
 };
 use egui_notify::Toasts;
 use egui_pull_to_refresh::PullToRefresh;
@@ -16,6 +17,8 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use time::{format_description, OffsetDateTime};
+
+use super::networking::remove_comment;
 
 nestify::nest! {
     pub struct Wallpapy {
@@ -134,7 +137,6 @@ impl Wallpapy {
 
                 // Text input for submitting a comment
                 ui.text_edit_singleline(&mut self.comment_submission);
-                // Button to submit the comment
                 if ui.button("Submit Comment").clicked() {
                     let toasts_store = self.toasts.clone();
                     let network_store = self.network_data.clone();
@@ -183,12 +185,12 @@ impl Wallpapy {
                         DatabaseObjectType::Wallpaper(wallpaper.clone()),
                     )
                 })
-                // .chain(comments.iter().map(|comment| {
-                //     (
-                //         comment.datetime,
-                //         DatabaseObjectType::Comment(comment.clone()),
-                //     )
-                // }))
+                .chain(comments.iter().map(|comment| {
+                    (
+                        comment.datetime,
+                        DatabaseObjectType::Comment(comment.clone()),
+                    )
+                }))
                 .collect::<Vec<_>>();
             combined_list.sort_by_key(|(datetime, _)| *datetime);
             let combined_list = combined_list;
@@ -208,10 +210,11 @@ impl Wallpapy {
                                     let scale = cell_width / image.width as f32;
                                     chunk_height = chunk_height.max(image.height as f32 * scale);
                                 }
-                                DatabaseObjectType::Comment(_) => {
-                                    chunk_height = chunk_height.max(cell_width);
-                                }
+                                DatabaseObjectType::Comment(_) => {}
                             }
+                        }
+                        if chunk_height == 0.0 {
+                            chunk_height = cell_width * 0.5;
                         }
                         ui.horizontal(|ui| {
                             for (_, data) in chunk {
@@ -224,7 +227,14 @@ impl Wallpapy {
                                             chunk_height,
                                         );
                                     }
-                                    DatabaseObjectType::Comment(comment) => {}
+                                    DatabaseObjectType::Comment(comment) => {
+                                        self.draw_comment_box(
+                                            ui,
+                                            comment,
+                                            cell_width,
+                                            chunk_height,
+                                        );
+                                    }
                                 }
                             }
                         });
@@ -289,10 +299,11 @@ impl Wallpapy {
             image_rect.right_top() + vec2(-20.0, 20.0),
             delete_button_size,
         );
+        let is_hovering = ui.rect_contains_pointer(delete_button_rect);
         painter.add(Shape::rect_filled(
             delete_button_rect,
             ui_scale,
-            Color32::DARK_RED.gamma_multiply(0.8),
+            Color32::BLACK.gamma_multiply(if is_hovering { 1.0 } else { 0.8 }),
         ));
         painter.text(
             delete_button_rect.center(),
@@ -301,11 +312,25 @@ impl Wallpapy {
             FontId::proportional(ui_scale),
             Color32::WHITE,
         );
-        // Check if the cursor is hovering over the delete button
-        if ui.rect_contains_pointer(delete_button_rect) {
+        if is_hovering {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
             if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
-                println!("Delete wallpaper: {:?}", wallpaper.id);
+                let toasts_store = self.toasts.clone();
+                let network_store = self.network_data.clone();
+                remove_image(
+                    &self.host,
+                    &self.stored.auth_token,
+                    &wallpaper.id,
+                    move |result| match result {
+                        Ok(()) => {
+                            toasts_store.lock().success("Deleted wallpaper");
+                            network_store.lock().get_gallery = GetGalleryState::Wanted;
+                        }
+                        Err(_) => {
+                            toasts_store.lock().error("Failed to delete wallpaper");
+                        }
+                    },
+                );
             }
         }
 
@@ -314,10 +339,16 @@ impl Wallpapy {
             delete_button_rect.left_top() + vec2(-10.0, 0.0),
             delete_button_size,
         );
+        let is_hovering = ui.rect_contains_pointer(thumbs_down_button_rect);
         painter.add(Shape::rect_filled(
             thumbs_down_button_rect,
             ui_scale,
-            Color32::BLACK.gamma_multiply(0.8),
+            if wallpaper.vote_state == LikedState::Disliked {
+                Color32::DARK_RED
+            } else {
+                Color32::BLACK
+            }
+            .gamma_multiply(if is_hovering { 1.0 } else { 0.8 }),
         ));
         painter.text(
             thumbs_down_button_rect.center(),
@@ -326,11 +357,25 @@ impl Wallpapy {
             FontId::proportional(ui_scale),
             Color32::WHITE,
         );
-        // Check if the cursor is hovering over the thumbs_down button
-        if ui.rect_contains_pointer(thumbs_down_button_rect) {
+        if is_hovering {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
             if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
-                println!("Thumbs down wallpaper: {:?}", wallpaper.id);
+                let toasts_store = self.toasts.clone();
+                let network_store = self.network_data.clone();
+                like_image(
+                    &self.host,
+                    &self.stored.auth_token,
+                    &wallpaper.id,
+                    LikedState::Disliked,
+                    move |result| match result {
+                        Ok(()) => {
+                            network_store.lock().get_gallery = GetGalleryState::Wanted;
+                        }
+                        Err(_) => {
+                            toasts_store.lock().error("Failed to dislike wallpaper");
+                        }
+                    },
+                );
             }
         }
 
@@ -339,10 +384,16 @@ impl Wallpapy {
             thumbs_down_button_rect.left_top() + vec2(-10.0, 0.0),
             delete_button_size,
         );
+        let is_hovering = ui.rect_contains_pointer(thumbs_up_button_rect);
         painter.add(Shape::rect_filled(
             thumbs_up_button_rect,
             ui_scale,
-            Color32::BLACK.gamma_multiply(0.8),
+            if wallpaper.vote_state == LikedState::Liked {
+                Color32::from_rgb(160, 100, 0)
+            } else {
+                Color32::BLACK
+            }
+            .gamma_multiply(if is_hovering { 1.0 } else { 0.8 }),
         ));
         painter.text(
             thumbs_up_button_rect.center(),
@@ -351,11 +402,25 @@ impl Wallpapy {
             FontId::proportional(ui_scale),
             Color32::WHITE,
         );
-        // Check if the cursor is hovering over the thumbs_up button
-        if ui.rect_contains_pointer(thumbs_up_button_rect) {
+        if is_hovering {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
             if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
-                println!("Thumbs up wallpaper: {:?}", wallpaper.id);
+                let toasts_store = self.toasts.clone();
+                let network_store = self.network_data.clone();
+                like_image(
+                    &self.host,
+                    &self.stored.auth_token,
+                    &wallpaper.id,
+                    LikedState::Liked,
+                    move |result| match result {
+                        Ok(()) => {
+                            network_store.lock().get_gallery = GetGalleryState::Wanted;
+                        }
+                        Err(_) => {
+                            toasts_store.lock().error("Failed to like wallpaper");
+                        }
+                    },
+                );
             }
         }
 
@@ -371,11 +436,104 @@ impl Wallpapy {
             prompt_galley.size(),
         );
         painter.add(Shape::rect_filled(
-            prompt_rect.expand(ui_scale * 0.5),
+            prompt_rect.expand(ui_scale * 0.5625),
+            ui_scale,
+            match wallpaper.vote_state {
+                LikedState::Liked => Color32::from_rgb(160, 100, 0),
+                LikedState::Disliked => Color32::DARK_RED,
+                LikedState::None => Color32::BLACK,
+            }
+            .gamma_multiply(0.8),
+        ));
+        painter.galley(prompt_rect.min, prompt_galley, Color32::WHITE);
+    }
+
+    fn draw_comment_box(&self, ui: &mut egui::Ui, comment: &CommentData, width: f32, height: f32) {
+        let (response, painter) = ui.allocate_painter(Vec2::new(width, height), Sense::click());
+        let rect = response.rect;
+
+        // Start painting
+        let ui_scale = 12.0;
+
+        // Draw rounded rectangle filling the rect
+        painter.add(Shape::rect_filled(
+            rect,
+            ui_scale,
+            Color32::from_rgb(25, 25, 35).gamma_multiply(0.8),
+        ));
+
+        // Draw date in top-left corner
+        let format = format_description::parse("[day]/[month]/[year] [hour]:[minute]").unwrap();
+        let datetime_text = comment.datetime.format(&format).unwrap();
+
+        let datetime_galley = painter.layout_no_wrap(
+            datetime_text,
+            FontId::proportional(ui_scale),
+            Color32::WHITE.gamma_multiply(0.8),
+        );
+        let datetime_rect = egui::Align2::LEFT_TOP
+            .anchor_size(rect.left_top() + vec2(20.0, 20.0), datetime_galley.size());
+        painter.add(Shape::rect_filled(
+            datetime_rect.expand(ui_scale * 0.5),
             ui_scale,
             Color32::BLACK.gamma_multiply(0.8),
         ));
-        painter.galley(prompt_rect.min, prompt_galley, Color32::WHITE);
+        painter.galley(datetime_rect.min, datetime_galley, Color32::WHITE);
+
+        // Add delete button in top-right corner
+        let delete_button_size = vec2(ui_scale.mul_add(2.0, 2.0), ui_scale.mul_add(2.0, 2.0));
+        let delete_button_rect = egui::Align2::RIGHT_TOP
+            .anchor_size(rect.right_top() + vec2(-20.0, 20.0), delete_button_size);
+        let is_hovering = ui.rect_contains_pointer(delete_button_rect);
+        painter.add(Shape::rect_filled(
+            delete_button_rect,
+            ui_scale,
+            Color32::BLACK.gamma_multiply(if is_hovering { 1.0 } else { 0.8 }),
+        ));
+        painter.text(
+            delete_button_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            egui_phosphor::regular::X,
+            FontId::proportional(ui_scale),
+            Color32::WHITE,
+        );
+        if is_hovering {
+            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+            if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
+                let toasts_store = self.toasts.clone();
+                let network_store = self.network_data.clone();
+                remove_comment(
+                    &self.host,
+                    &self.stored.auth_token,
+                    &comment.id,
+                    move |result| match result {
+                        Ok(()) => {
+                            toasts_store.lock().success("Deleted comment");
+                            network_store.lock().get_gallery = GetGalleryState::Wanted;
+                        }
+                        Err(_) => {
+                            toasts_store.lock().error("Failed to delete comment");
+                        }
+                    },
+                );
+            }
+        }
+
+        // Draw comments text in bottom center
+        let text_galley = painter.layout(
+            comment.comment.clone(),
+            FontId::proportional(ui_scale),
+            Color32::WHITE.gamma_multiply(0.8),
+            width - 40.0,
+        );
+        let text_rect = egui::Align2::CENTER_BOTTOM
+            .anchor_size(rect.center_bottom() + vec2(0.0, -20.0), text_galley.size());
+        painter.add(Shape::rect_filled(
+            text_rect.expand(ui_scale * 0.5),
+            ui_scale,
+            Color32::BLACK.gamma_multiply(0.8),
+        ));
+        painter.galley(text_rect.min, text_galley, Color32::WHITE);
     }
 
     fn get_gallery(&mut self) {
