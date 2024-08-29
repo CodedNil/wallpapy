@@ -95,6 +95,7 @@ impl eframe::App for Wallpapy {
 
         ctx.style_mut(|style| {
             style.visuals.window_shadow = egui::epaint::Shadow::NONE;
+            style.spacing.item_spacing = Vec2::new(8.0, 8.0);
         });
 
         let mut fonts = egui::FontDefinitions::default();
@@ -196,49 +197,34 @@ impl Wallpapy {
             let combined_list = combined_list;
 
             let available_width = ui.available_width();
+            let spacing = ui.spacing().item_spacing;
             let cell_width = 400.0;
-            let columns = (available_width / cell_width).floor().max(1.0) as usize;
-            let cell_width = available_width / columns as f32;
+            let columns = (available_width / (cell_width + spacing.x))
+                .floor()
+                .max(1.0) as usize;
+            let cell_width =
+                (columns as f32 - 1.0).mul_add(-spacing.x, available_width / columns as f32);
+            let cell_height = cell_width * 0.5625;
 
             let refresh_response = PullToRefresh::new(false).scroll_area_ui(ui, |ui| {
                 ScrollArea::vertical().show(ui, |ui| {
-                    for chunk in combined_list.chunks(columns) {
-                        let mut chunk_height: f32 = 0.0;
-                        for (_, data) in chunk {
+                    ui.horizontal_wrapped(|ui| {
+                        for (_, data) in combined_list.iter().rev() {
                             match data {
                                 DatabaseObjectType::Wallpaper(image) => {
-                                    let scale = cell_width / image.width as f32;
-                                    chunk_height = chunk_height.max(image.height as f32 * scale);
+                                    self.draw_wallpaper_box(ui, image, cell_width, cell_height);
                                 }
-                                DatabaseObjectType::Comment(_) => {}
-                            }
-                        }
-                        if chunk_height == 0.0 {
-                            chunk_height = cell_width * 0.5;
-                        }
-                        ui.horizontal(|ui| {
-                            for (_, data) in chunk {
-                                match data {
-                                    DatabaseObjectType::Wallpaper(image) => {
-                                        self.draw_wallpaper_box(
-                                            ui,
-                                            image,
-                                            cell_width,
-                                            chunk_height,
-                                        );
-                                    }
-                                    DatabaseObjectType::Comment(comment) => {
-                                        self.draw_comment_box(
-                                            ui,
-                                            comment,
-                                            cell_width,
-                                            chunk_height,
-                                        );
-                                    }
+                                DatabaseObjectType::Comment(comment) => {
+                                    self.draw_comment_box(
+                                        ui,
+                                        comment,
+                                        cell_width * 0.5,
+                                        cell_height,
+                                    );
                                 }
                             }
-                        });
-                    }
+                        }
+                    })
                 })
             });
             if refresh_response.should_refresh() {
