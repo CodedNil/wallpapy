@@ -79,18 +79,10 @@ pub async fn remove(packet: Bytes) -> impl IntoResponse {
         return StatusCode::UNAUTHORIZED;
     }
 
-    // Remove the database entry
-    let result = (|| -> Result<()> {
-        sled::open(DATABASE_PATH)?
-            .open_tree(IMAGES_TREE)?
-            .remove(packet.uuid)?;
-        Ok(())
-    })();
-
-    match result {
+    match Box::pin(remove_wallpaper_impl(packet)).await {
         Ok(()) => StatusCode::OK,
         Err(e) => {
-            log::error!("Errored remove_comment {:?}", e);
+            log::error!("Errored remove_image {:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         }
     }
@@ -177,6 +169,31 @@ async fn generate_wallpaper_impl() -> Result<()> {
         .map_err(|e| anyhow!("Failed to open tree: {:?}", e))?
         .insert(id, bincode::serialize(&image_data)?)
         .map_err(|e| anyhow!("Failed to insert into tree: {:?}", e))?;
+
+    Ok(())
+}
+
+async fn remove_wallpaper_impl(packet: TokenUuidPacket) -> Result<()> {
+    // Open the database and find the entry
+    let db = sled::open(DATABASE_PATH)?;
+    let tree = db.open_tree(IMAGES_TREE)?;
+
+    // Retrieve the existing entry
+    if let Some(data) = tree.get(packet.uuid)? {
+        let wallpaper_data: WallpaperData = bincode::deserialize(&data)?;
+
+        // Construct the file path and remove the file
+        let dir = Path::new("wallpapers");
+        let file_path = dir.join(&wallpaper_data.file_name);
+        if file_path.exists() {
+            fs::remove_file(file_path).await?;
+        }
+
+        // Remove the database entry
+        tree.remove(packet.uuid)?;
+    } else {
+        return Err(anyhow::anyhow!("No entry found for UUID"));
+    }
 
     Ok(())
 }

@@ -459,7 +459,7 @@ impl Wallpapy {
         painter.add(Shape::rect_filled(
             rect,
             ui_scale,
-            Color32::from_rgb(25, 25, 35).gamma_multiply(0.8),
+            Color32::from_rgb(60, 60, 80).gamma_multiply(0.8),
         ));
 
         // Draw date in top-left corner
