@@ -102,7 +102,9 @@ impl eframe::App for Wallpapy {
         egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
         ctx.set_fonts(fonts);
 
-        self.get_gallery();
+        ctx.request_repaint();
+
+        self.get_gallery(ctx);
         if self.stored.auth_token.is_empty() {
             self.show_login_panel(ctx);
         } else {
@@ -228,7 +230,7 @@ impl Wallpapy {
                 })
             });
             if refresh_response.should_refresh() {
-                self.get_gallery();
+                self.network_data.lock().get_gallery = GetGalleryState::Wanted;
             }
         });
     }
@@ -522,13 +524,14 @@ impl Wallpapy {
         painter.galley(text_rect.min, text_galley, Color32::WHITE);
     }
 
-    fn get_gallery(&mut self) {
+    fn get_gallery(&mut self, ctx: &Context) {
         let network_store = self.network_data.clone();
         let mut network_data_guard = network_store.lock();
         match &network_data_guard.get_gallery {
             GetGalleryState::InProgress | GetGalleryState::None => {}
             GetGalleryState::Wanted => {
                 log::info!("Fetching gallery");
+                ctx.request_repaint();
                 network_data_guard.get_gallery = GetGalleryState::InProgress;
                 drop(network_data_guard);
 

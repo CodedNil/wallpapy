@@ -51,29 +51,21 @@ pub async fn generate() -> Result<String> {
     for (date, data) in database_history {
         let format = format_description::parse("[day]/[month]/[year] [hour]:[minute]").unwrap();
         let datetime_text = date.format(&format).unwrap();
-        let mut cur_string = format!("{datetime_text}: ");
-        match data {
+        history_string.push_str(&match data {
             DatabaseObjectType::Wallpaper(wallpaper) => {
-                cur_string.push_str(&format!(
-                    "Wallpaper created with prompt: '{}'",
-                    wallpaper.prompt
-                ));
-                if wallpaper.vote_state != LikedState::None {
-                    cur_string.push_str(&format!(
-                        " (user {} this)",
-                        match wallpaper.vote_state {
-                            LikedState::Liked => "liked",
-                            LikedState::Disliked => "disliked",
-                            LikedState::None => "unknown",
-                        }
-                    ));
-                }
+                let liked_state = match wallpaper.vote_state {
+                    LikedState::Liked => " (user liked this)",
+                    LikedState::Disliked => " (user disliked this)",
+                    LikedState::None => "",
+                };
+                let prompt = wallpaper.prompt;
+                format!("{datetime_text}: Wallpaper{liked_state} created with prompt: '{prompt}'")
             }
             DatabaseObjectType::Comment(comment) => {
-                cur_string.push_str(format!("User commented: '{}'", comment.comment).as_str());
+                let comment = comment.comment;
+                format!("{datetime_text}: User commented: '{comment}'")
             }
-        }
-        history_string.push_str(&cur_string);
+        });
         history_string.push('\n');
     }
 
