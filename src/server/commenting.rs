@@ -21,17 +21,16 @@ pub async fn add_comment(packet: Bytes) -> impl IntoResponse {
     // Store a new database entry
     let result = (|| -> Result<()> {
         let id = Uuid::new_v4();
-        let db = sled::open(DATABASE_PATH)?;
-        let tree = db.open_tree(COMMENTS_TREE)?;
-
-        tree.insert(
-            id,
-            bincode::serialize(&CommentData {
+        sled::open(DATABASE_PATH)?
+            .open_tree(COMMENTS_TREE)?
+            .insert(
                 id,
-                datetime: OffsetDateTime::now_utc(),
-                comment: packet.string,
-            })?,
-        )?;
+                bincode::serialize(&CommentData {
+                    id,
+                    datetime: OffsetDateTime::now_utc(),
+                    comment: packet.string,
+                })?,
+            )?;
 
         Ok(())
     })();
@@ -60,11 +59,9 @@ pub async fn remove_comment(packet: Bytes) -> impl IntoResponse {
 
     // Remove the database entry
     let result = (|| -> Result<()> {
-        let db = sled::open(DATABASE_PATH)?;
-        let tree = db.open_tree(COMMENTS_TREE)?;
-
-        tree.remove(packet.uuid)?;
-
+        sled::open(DATABASE_PATH)?
+            .open_tree(COMMENTS_TREE)?
+            .remove(packet.uuid)?;
         Ok(())
     })();
 

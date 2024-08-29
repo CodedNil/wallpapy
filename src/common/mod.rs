@@ -25,7 +25,20 @@ pub struct TokenUuidPacket {
     pub uuid: Uuid,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize)]
+pub struct TokenUuidLikedPacket {
+    pub token: String,
+    pub uuid: Uuid,
+    pub liked: LikedState,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub enum DatabaseObjectType {
+    Wallpaper(WallpaperData),
+    Comment(CommentData),
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct WallpaperData {
     pub id: Uuid,
     pub datetime: OffsetDateTime,
@@ -37,7 +50,7 @@ pub struct WallpaperData {
     pub vote_state: LikedState,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct CommentData {
     pub id: Uuid,
     pub datetime: OffsetDateTime,
@@ -50,7 +63,7 @@ pub struct GetWallpapersResponse {
     pub comments: Vec<CommentData>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub enum LikedState {
     None,
     Liked,

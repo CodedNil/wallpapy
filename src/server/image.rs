@@ -1,4 +1,7 @@
-use crate::common::{CommentData, GetWallpapersResponse, LikedState, TokenPacket, WallpaperData};
+use crate::common::{
+    CommentData, GetWallpapersResponse, LikedState, TokenPacket, TokenUuidLikedPacket,
+    TokenUuidPacket, WallpaperData,
+};
 use crate::server::{auth::verify_token, prompt, COMMENTS_TREE, DATABASE_PATH, IMAGES_TREE};
 use anyhow::{anyhow, Result};
 use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
@@ -13,7 +16,7 @@ use uuid::Uuid;
 
 const TIMEOUT: u64 = 40;
 
-pub async fn generate_wallpaper(packet: Bytes) -> impl IntoResponse {
+pub async fn generate(packet: Bytes) -> impl IntoResponse {
     let packet: TokenPacket = match bincode::deserialize(&packet) {
         Ok(packet) => packet,
         Err(e) => {
@@ -35,7 +38,7 @@ pub async fn generate_wallpaper(packet: Bytes) -> impl IntoResponse {
     }
 }
 
-pub async fn get_wallpapers() -> impl IntoResponse {
+pub async fn get() -> impl IntoResponse {
     match sled::open(DATABASE_PATH)
         .and_then(|db| Ok((db.clone(), db.open_tree(IMAGES_TREE)?)))
         .and_then(|(db, images_tree)| Ok((images_tree, db.open_tree(COMMENTS_TREE)?)))
@@ -63,6 +66,74 @@ pub async fn get_wallpapers() -> impl IntoResponse {
     StatusCode::INTERNAL_SERVER_ERROR.into_response()
 }
 
+pub async fn remove(packet: Bytes) -> impl IntoResponse {
+    let packet: TokenUuidPacket = match bincode::deserialize(&packet) {
+        Ok(packet) => packet,
+        Err(e) => {
+            log::error!("Failed to deserialize remove_comment packet: {:?}", e);
+            return StatusCode::BAD_REQUEST;
+        }
+    };
+    if !matches!(verify_token(&packet.token), Ok(true)) {
+        log::error!("Unauthorized remove_comment request");
+        return StatusCode::UNAUTHORIZED;
+    }
+
+    // Remove the database entry
+    let result = (|| -> Result<()> {
+        sled::open(DATABASE_PATH)?
+            .open_tree(IMAGES_TREE)?
+            .remove(packet.uuid)?;
+        Ok(())
+    })();
+
+    match result {
+        Ok(()) => StatusCode::OK,
+        Err(e) => {
+            log::error!("Errored remove_comment {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
+}
+
+pub async fn like(packet: Bytes) -> impl IntoResponse {
+    let packet: TokenUuidLikedPacket = match bincode::deserialize(&packet) {
+        Ok(packet) => packet,
+        Err(e) => {
+            log::error!("Failed to deserialize upvote_image packet: {:?}", e);
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+    };
+
+    if !matches!(verify_token(&packet.token), Ok(true)) {
+        log::error!("Unauthorized upvote_image request");
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+
+    // Set the vote state
+    let result = (|| -> Result<()> {
+        let tree = sled::open(DATABASE_PATH)?.open_tree(IMAGES_TREE)?;
+
+        let mut wallpaper_data: WallpaperData = bincode::deserialize(
+            &tree
+                .get(packet.uuid)?
+                .ok_or_else(|| anyhow::anyhow!("Image not found"))?,
+        )?;
+        wallpaper_data.vote_state = packet.liked;
+        tree.insert(packet.uuid, bincode::serialize(&wallpaper_data)?)?;
+
+        Ok(())
+    })();
+
+    match result {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => {
+            log::error!("Failed to upvote image: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
 async fn generate_wallpaper_impl() -> Result<()> {
     log::info!("Generating wallpaper");
 
@@ -71,7 +142,7 @@ async fn generate_wallpaper_impl() -> Result<()> {
 
     // Generate image
     let prompt = prompt::generate().await?;
-    let image = generate(&prompt).await?;
+    let image = image_diffusion(&prompt).await?;
     let (width, height) = image.dimensions();
 
     // Resize the image to thumbnail
@@ -110,7 +181,7 @@ async fn generate_wallpaper_impl() -> Result<()> {
     Ok(())
 }
 
-async fn generate(prompt: &str) -> Result<DynamicImage> {
+async fn image_diffusion(prompt: &str) -> Result<DynamicImage> {
     let client = reqwest::Client::new();
 
     let api_token =

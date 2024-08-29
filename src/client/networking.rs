@@ -1,5 +1,9 @@
-use crate::common::{GetWallpapersResponse, LoginPacket, TokenPacket};
+use crate::common::{
+    GetWallpapersResponse, LikedState, LoginPacket, TokenPacket, TokenStringPacket,
+    TokenUuidLikedPacket, TokenUuidPacket,
+};
 use anyhow::Result;
+use uuid::Uuid;
 
 pub fn login(
     host: &str,
@@ -76,6 +80,92 @@ pub fn get_gallery(
                 }
                 Err(e) => Err(anyhow::anyhow!("Network error loading gallery: {}", e)),
             });
+        }),
+    );
+}
+
+pub fn add_comment(
+    host: &str,
+    token: &str,
+    comment: &str,
+    on_done: impl 'static + Send + FnOnce(Result<()>),
+) {
+    ehttp::fetch(
+        ehttp::Request::post(
+            &format!("http://{host}/commentadd"),
+            bincode::serialize(&TokenStringPacket {
+                token: token.to_string(),
+                string: comment.to_string(),
+            })
+            .unwrap(),
+        ),
+        Box::new(move |_| {
+            on_done(Ok(()));
+        }),
+    );
+}
+
+pub fn remove_comment(
+    host: &str,
+    token: &str,
+    comment_id: &Uuid,
+    on_done: impl 'static + Send + FnOnce(Result<()>),
+) {
+    ehttp::fetch(
+        ehttp::Request::post(
+            &format!("http://{host}/commentremove"),
+            bincode::serialize(&TokenUuidPacket {
+                token: token.to_string(),
+                uuid: *comment_id,
+            })
+            .unwrap(),
+        ),
+        Box::new(move |_| {
+            on_done(Ok(()));
+        }),
+    );
+}
+
+pub fn like_image(
+    host: &str,
+    token: &str,
+    image_id: &Uuid,
+    liked: LikedState,
+    on_done: impl 'static + Send + FnOnce(Result<()>),
+) {
+    ehttp::fetch(
+        ehttp::Request::post(
+            &format!("http://{host}/imageliked"),
+            bincode::serialize(&TokenUuidLikedPacket {
+                token: token.to_string(),
+                uuid: *image_id,
+                liked,
+            })
+            .unwrap(),
+        ),
+        Box::new(move |_| {
+            on_done(Ok(()));
+        }),
+    );
+}
+
+pub fn remove_image(
+    host: &str,
+    token: &str,
+    image_id: &Uuid,
+    on_done: impl 'static + Send + FnOnce(Result<()>),
+) {
+    ehttp::fetch(
+        ehttp::Request::post(
+            &format!("http://{host}/imageremove"),
+            bincode::serialize(&TokenUuidPacket {
+                token: token.to_string(),
+                uuid: *image_id,
+            })
+            .unwrap(),
+        ),
+        Box::new(move |_| {
+            on_done(Ok(()));
         }),
     );
 }
