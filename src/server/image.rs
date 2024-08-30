@@ -159,7 +159,7 @@ pub async fn like(packet: Bytes) -> impl IntoResponse {
     }
 }
 
-async fn generate_wallpaper_impl() -> Result<()> {
+pub async fn generate_wallpaper_impl() -> Result<()> {
     log::info!("Generating wallpaper");
 
     let id = Uuid::new_v4();

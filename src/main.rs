@@ -39,6 +39,10 @@ async fn main() {
     println!("Listening on {addr}");
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
 
+    tokio::spawn(async move {
+        Box::pin(server::routing::start_server()).await;
+    });
+
     #[cfg(not(feature = "gui"))]
     axum::serve(listener, app).await.unwrap();
 
