@@ -1,6 +1,6 @@
 [package]
 name = "wallpapy"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.80"
 
@@ -14,7 +14,6 @@ nestify = "0.3.3"
 parking_lot = "0.12.3"
 uuid = { version = "1.10.0", features = ["v4", "fast-rng", "js", "serde"] }
 thumbhash = "0.1.0"
-image = { version = "0.25.2", features = ["jpeg", "png"] }
 time = { version = "0.3.36", features = ["serde"] }
 
 # GUI dependencies
@@ -59,6 +58,8 @@ tower-http = { version = "0.5.2", features = [
 rand = "0.8.5"
 argon2 = "0.5.3"
 mime_guess = "2.0.5"
+image = { version = "0.25.2", features = ["jpeg", "png"] }
+webp = "0.3.0"
 
 [features]
 default = ["gui"]

@@ -232,14 +232,15 @@ impl Wallpapy {
         width: f32,
         height: f32,
     ) {
+        let file_name = wallpaper.upscaled_file.as_ref().map_or_else(
+            || wallpaper.original_file.file_name.clone(),
+            |upscaled_file| upscaled_file.file_name.clone(),
+        );
         let image_rect = ui
             .add_sized(
                 Vec2::new(width, height),
                 ThumbhashImage::new(
-                    egui::Image::new(&format!(
-                        "http://{}/wallpapers/{}",
-                        self.host, wallpaper.file_name
-                    )),
+                    egui::Image::new(&format!("http://{}/wallpapers/{}", self.host, file_name)),
                     &wallpaper.thumbhash,
                 )
                 .id(format!("gallery_item_{}", wallpaper.id).into())

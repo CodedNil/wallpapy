@@ -1,12 +1,12 @@
 use crate::common::{
-    CommentData, GetWallpapersResponse, LikedState, TokenPacket, TokenUuidLikedPacket,
-    TokenUuidPacket, WallpaperData,
+    CommentData, GetWallpapersResponse, ImageFile, LikedState, TokenPacket, TokenUuidLikedPacket,
+    TokenUuidPacket, UpscaleState, WallpaperData, WallpaperImageType,
 };
 use crate::server::{auth::verify_token, prompt, COMMENTS_TREE, DATABASE_PATH, IMAGES_TREE};
 use anyhow::{anyhow, Result};
 use axum::http::{HeaderMap, HeaderValue};
 use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
-use image::{DynamicImage, GenericImageView, ImageReader};
+use image::{imageops, DynamicImage, ExtendedColorType, ImageReader};
 use reqwest::Client;
 use serde_json::json;
 use std::{env, path::Path, time::Duration};
@@ -78,7 +78,12 @@ pub async fn latest() -> impl IntoResponse {
                 .values()
                 .filter_map(|v| v.ok().and_then(|bytes| bincode::deserialize(&bytes).ok()))
                 .max_by_key(|wallpaper: &WallpaperData| wallpaper.datetime)
-                .map(|image| image.file_name)
+                .map(|image| {
+                    image.upscaled_file.as_ref().map_or_else(
+                        || image.original_file.file_name.clone(),
+                        |upscaled_file| upscaled_file.file_name.clone(),
+                    )
+                })
             {
                 let image_path = Path::new("wallpapers").join(&file_name);
                 if let Ok(data) = std::fs::read(&image_path) {
@@ -167,10 +172,26 @@ pub async fn generate_wallpaper_impl() -> Result<()> {
     let format = format_description::parse("[day]/[month]/[year] [hour]:[minute]")?;
     let datetime_text = datetime.format(&format)?;
 
-    // Generate image
+    // Generate image prompt
     let prompt = prompt::generate().await?;
-    let image = image_diffusion(&prompt).await?;
-    let (width, height) = image.dimensions();
+    log::info!("Generated prompt: {}", prompt);
+
+    // Generate image
+    let client = Client::new();
+    let api_token =
+        env::var("REPLICATE_API_TOKEN").expect("REPLICATE_API_TOKEN environment variable not set");
+    let (image_url, image) = image_diffusion(&client, &api_token, &prompt).await?;
+    log::info!("Generated image: {}", &image_url);
+
+    // Upscale the image using Real-ESRGAN
+    let (upscaled_url, upscaled_image) = upscale_image(&client, &api_token, &image_url).await?;
+    log::info!("Upscaled image: {}", &upscaled_url);
+    // If upscaled image is larger than 3840x2160 downscale it
+    let upscaled_image = if upscaled_image.width() > 4096 || upscaled_image.height() > 4096 {
+        upscaled_image.resize_to_fill(3820, 2160, imageops::FilterType::Lanczos3)
+    } else {
+        upscaled_image
+    };
 
     // Resize the image to thumbnail
     let thumbnail = image.thumbnail(32, 32);
@@ -183,17 +204,49 @@ pub async fn generate_wallpaper_impl() -> Result<()> {
     // Save to file
     let dir = Path::new("wallpapers");
     fs::create_dir_all(dir).await?;
-    let file_name = format!("{}.jpg", &datetime.format(&Rfc3339)?);
-    image.save(dir.join(&file_name))?;
+
+    let datetime_str = datetime.format(&Rfc3339)?;
+
+    // Save the original image
+    let file_name = format!("{datetime_str}.webp");
+    {
+        let file_writer = std::fs::File::create(dir.join(&file_name))?;
+        let encoder = image::codecs::webp::WebPEncoder::new_lossless(file_writer);
+        encoder.encode(
+            &image.to_rgba8(),
+            image.width(),
+            image.height(),
+            ExtendedColorType::Rgba8,
+        )?;
+    }
+    let original_file = ImageFile {
+        file_name,
+        width: image.width(),
+        height: image.height(),
+    };
+
+    // Save the upscaled image
+    let upscaled_file_name = format!("{datetime_str}_upscaled.webp");
+    {
+        let encoder = webp::Encoder::from_image(&upscaled_image).unwrap();
+        let webp = encoder.encode(90.0);
+        std::fs::write(dir.join(&upscaled_file_name), &*webp)?;
+    }
+    let upscaled_file = Some(ImageFile {
+        file_name: upscaled_file_name,
+        width: upscaled_image.width(),
+        height: upscaled_image.height(),
+    });
 
     let image_data = WallpaperData {
         id,
+        image_type: WallpaperImageType::Desktop16x9,
         datetime,
         datetime_text,
         prompt,
-        file_name,
-        width,
-        height,
+        original_file,
+        upscaled_file,
+        upscale_state: UpscaleState::Basic,
         thumbhash,
         vote_state: LikedState::None,
     };
@@ -220,9 +273,15 @@ async fn remove_wallpaper_impl(packet: TokenUuidPacket) -> Result<()> {
 
         // Construct the file path and remove the file
         let dir = Path::new("wallpapers");
-        let file_path = dir.join(&wallpaper_data.file_name);
+        let file_path = dir.join(&wallpaper_data.original_file.file_name);
         if file_path.exists() {
             fs::remove_file(file_path).await?;
+        }
+        if let Some(upscaled_file) = wallpaper_data.upscaled_file {
+            let upscaled_file = dir.join(&upscaled_file.file_name);
+            if upscaled_file.exists() {
+                fs::remove_file(upscaled_file).await?;
+            }
         }
 
         // Remove the database entry
@@ -234,14 +293,15 @@ async fn remove_wallpaper_impl(packet: TokenUuidPacket) -> Result<()> {
     Ok(())
 }
 
-async fn image_diffusion(prompt: &str) -> Result<DynamicImage> {
-    let client = Client::new();
-    let api_token =
-        env::var("REPLICATE_API_TOKEN").expect("REPLICATE_API_TOKEN environment variable not set");
-
+/// <https://replicate.com/black-forest-labs/flux-schnell>
+async fn image_diffusion(
+    client: &Client,
+    api_token: &str,
+    prompt: &str,
+) -> Result<(String, DynamicImage)> {
     let status_url = replicate_request_prediction(
-        &client,
-        &api_token,
+        client,
+        api_token,
         "black-forest-labs/flux-schnell",
         &json!({
             "input": {
@@ -254,14 +314,22 @@ async fn image_diffusion(prompt: &str) -> Result<DynamicImage> {
         }),
     )
     .await?;
-    let image_url = replicate_poll_status(&client, &api_token, &status_url).await?;
+    let image_url = replicate_poll_status(client, api_token, &status_url).await?;
 
-    let img = upscale_image(&image_url, &client, &api_token).await?;
-    Ok(img)
+    let img_data = client.get(&image_url).send().await?.bytes().await?;
+    let img = ImageReader::new(std::io::Cursor::new(img_data))
+        .with_guessed_format()?
+        .decode()?;
+
+    Ok((image_url, img))
 }
 
-async fn upscale_image(image_url: &str, client: &Client, api_token: &str) -> Result<DynamicImage> {
-    // https://replicate.com/nightmareai/real-esrgan
+/// <https://replicate.com/nightmareai/real-esrgan>
+async fn upscale_image(
+    client: &Client,
+    api_token: &str,
+    image_url: &str,
+) -> Result<(String, DynamicImage)> {
     let status_url = replicate_request_prediction(
         client,
         api_token,
@@ -283,7 +351,7 @@ async fn upscale_image(image_url: &str, client: &Client, api_token: &str) -> Res
         .with_guessed_format()?
         .decode()?;
 
-    Ok(img)
+    Ok((image_url, img))
 }
 
 async fn replicate_request_prediction(

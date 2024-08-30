@@ -9,6 +9,7 @@ use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
 use rand::{distributions, thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
+use uuid::Uuid;
 
 const MIN_PASSWORD_LENGTH: usize = 6;
 const TOKEN_LENGTH: usize = 20;
@@ -19,6 +20,7 @@ nestify::nest! {
     struct AuthDatabase {
         accounts: Vec<struct Account {
             admin: bool,
+            uuid: Uuid,
             username: String,
             password_hash: String,
             tokens: Vec<struct Token {
@@ -77,6 +79,7 @@ fn login_impl(packet: &LoginPacket) -> Result<String> {
         let (token_entry, token) = generate_token();
         let new_account = Account {
             admin: true,
+            uuid: Uuid::new_v4(),
             username: packet.username.clone(),
             password_hash,
             tokens: vec![token_entry],
