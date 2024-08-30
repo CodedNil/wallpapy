@@ -6,9 +6,9 @@ use crate::server::{auth::verify_token, prompt, COMMENTS_TREE, DATABASE_PATH, IM
 use anyhow::{anyhow, Result};
 use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
 use image::{DynamicImage, GenericImageView, ImageReader};
+use reqwest::Client;
 use serde_json::json;
-use std::env;
-use std::path::Path;
+use std::{env, path::Path, time::Duration};
 use thumbhash::rgba_to_thumb_hash;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use tokio::fs;
@@ -199,15 +199,15 @@ async fn remove_wallpaper_impl(packet: TokenUuidPacket) -> Result<()> {
 }
 
 async fn image_diffusion(prompt: &str) -> Result<DynamicImage> {
-    let client = reqwest::Client::new();
-
+    let client = Client::new();
     let api_token =
         env::var("REPLICATE_API_TOKEN").expect("REPLICATE_API_TOKEN environment variable not set");
-    let response = client
-        .post("https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions")
-        .header("Authorization", format!("Bearer {api_token}"))
-        .header("Content-Type", "application/json")
-        .json(&json!({
+
+    let status_url = replicate_request_prediction(
+        &client,
+        &api_token,
+        "black-forest-labs/flux-schnell",
+        &json!({
             "input": {
                 "prompt": prompt,
                 "num_outputs": 1,
@@ -215,16 +215,74 @@ async fn image_diffusion(prompt: &str) -> Result<DynamicImage> {
                 "output_format": "png",
                 "output_quality": 80
             }
-        }))
+        }),
+    )
+    .await?;
+    let image_url = replicate_poll_status(&client, &api_token, &status_url).await?;
+
+    let img = upscale_image(&image_url, &client, &api_token).await?;
+    Ok(img)
+}
+
+async fn upscale_image(image_url: &str, client: &Client, api_token: &str) -> Result<DynamicImage> {
+    // https://replicate.com/nightmareai/real-esrgan
+    let status_url = replicate_request_prediction(
+        client,
+        api_token,
+        "",
+        &json!({
+            "version": "f121d640bd286e1fdc67f9799164c1d5be36ff74576ee11c803ae5b665dd46aa",
+            "input": {
+                "image": image_url,
+                "scale": 4,
+                "face_enhance": false
+            }
+        }),
+    )
+    .await?;
+    let image_url = replicate_poll_status(client, api_token, &status_url).await?;
+
+    let img_data = client.get(&image_url).send().await?.bytes().await?;
+    let img = ImageReader::new(std::io::Cursor::new(img_data))
+        .with_guessed_format()?
+        .decode()?;
+
+    Ok(img)
+}
+
+async fn replicate_request_prediction(
+    client: &Client,
+    api_token: &str,
+    model: &str,
+    input_json: &serde_json::Value,
+) -> Result<String> {
+    let url = if model.is_empty() {
+        "https://api.replicate.com/v1/predictions"
+    } else {
+        &format!("https://api.replicate.com/v1/models/{model}/predictions")
+    };
+    let response = client
+        .post(url)
+        .header("Authorization", format!("Bearer {api_token}"))
+        .header("Content-Type", "application/json")
+        .json(input_json)
         .send()
         .await?;
 
     let response_json = response.json::<serde_json::Value>().await?;
     let status_url = response_json["urls"]["get"]
         .as_str()
-        .ok_or_else(|| anyhow!("No valid status URL found"))?;
+        .ok_or_else(|| anyhow!("No valid status URL found"))?
+        .to_string();
 
-    let mut image_url = None;
+    Ok(status_url)
+}
+
+async fn replicate_poll_status(
+    client: &Client,
+    api_token: &str,
+    status_url: &str,
+) -> Result<String> {
     for _ in 0..TIMEOUT {
         let status_response = client
             .get(status_url)
@@ -232,28 +290,24 @@ async fn image_diffusion(prompt: &str) -> Result<DynamicImage> {
             .header("Content-Type", "application/json")
             .send()
             .await?;
+
         let status_json = status_response.json::<serde_json::Value>().await?;
 
-        if let Some(output) = status_json["output"].as_array() {
-            if let Some(url) = output.first().and_then(|v| v.as_str()) {
-                image_url = Some(url.to_string());
-                break;
+        if status_json["status"] == "succeeded" {
+            if let Some(url) = status_json["output"].as_str() {
+                return Ok(url.to_string());
+            }
+            if let Some(url) = status_json["output"]
+                .as_array()
+                .and_then(|arr| arr.first())
+                .and_then(|v| v.as_str())
+            {
+                return Ok(url.to_string());
             }
         }
 
-        if status_json["status"] == "succeeded" {
-            break;
-        }
-
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 
-    let image_url = image_url.ok_or_else(|| anyhow!("Image generation timed out or failed"))?;
-    let img_data = client.get(&image_url).send().await?.bytes().await?;
-
-    let img = ImageReader::new(std::io::Cursor::new(img_data))
-        .with_guessed_format()?
-        .decode()?;
-
-    Ok(img)
+    Err(anyhow!("Operation timed out or failed"))
 }

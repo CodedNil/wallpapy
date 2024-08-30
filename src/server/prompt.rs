@@ -77,7 +77,7 @@ pub async fn generate() -> Result<String> {
         "messages": [
             {
                 "role": "system",
-                "content": "You are a wallpaper image prompt generator, write a prompt for an wallpaper image in two sentences, works best with simple, short phrases that describe what you want to see. Avoid long lists of requests and instructions. Instead of: 'Show me a picture of lots of blooming California poppies, make them bright, vibrant orange, and draw them in an illustrated style with colored pencils' Try: 'Bright orange California poppies drawn with colored pencils'\nCreate something new and exciting, while respecting the users previous feedback, you can experiment with new themes and styles to keep it fresh."
+                "content": "You are a wallpaper image prompt generator, write a prompt for an wallpaper image in two sentences, works best with simple, short phrases that describe what you want to see. Avoid long lists of requests and instructions. Instead of: Show me a picture of lots of blooming California poppies, make them bright, vibrant orange, and draw them in an illustrated style with colored pencils Try: Bright orange California poppies drawn with colored pencils\nCreate something new and exciting, while respecting the users previous feedback, you can experiment with new themes and styles to keep it fresh."
             },
             {
                 "role": "user",
