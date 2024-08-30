@@ -4,6 +4,7 @@ use crate::common::{
 };
 use crate::server::{auth::verify_token, prompt, COMMENTS_TREE, DATABASE_PATH, IMAGES_TREE};
 use anyhow::{anyhow, Result};
+use axum::http::{HeaderMap, HeaderValue};
 use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
 use image::{DynamicImage, GenericImageView, ImageReader};
 use reqwest::Client;
@@ -79,14 +80,16 @@ pub async fn latest() -> impl IntoResponse {
                 .max_by_key(|wallpaper: &WallpaperData| wallpaper.datetime)
                 .map(|image| image.file_name)
             {
-                let image_data = std::fs::read(Path::new("wallpapers").join(&file_name));
-                match image_data {
-                    Ok(data) => {
-                        return (StatusCode::OK, data).into_response();
-                    }
-                    Err(e) => {
-                        log::error!("Failed to read image file: {:?}", e);
-                    }
+                let image_path = Path::new("wallpapers").join(&file_name);
+                if let Ok(data) = std::fs::read(&image_path) {
+                    let mime_type = mime_guess::from_path(&image_path).first_or_octet_stream();
+                    let mut headers = HeaderMap::new();
+                    headers.insert(
+                        "Content-Type",
+                        HeaderValue::from_str(mime_type.as_ref()).unwrap(),
+                    );
+
+                    return (StatusCode::OK, headers, data).into_response();
                 }
             }
         }

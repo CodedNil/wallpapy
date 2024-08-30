@@ -3700,6 +3700,7 @@ dependencies = [
  "image",
  "js-sys",
  "log",
+ "mime_guess",
  "nestify",
  "parking_lot",
  "rand 0.8.5",
