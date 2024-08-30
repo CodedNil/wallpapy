@@ -1,4 +1,5 @@
 /target
 /wallpapers
 /database
+/dist
 .env

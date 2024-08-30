@@ -2,7 +2,7 @@ use crate::common::{CommentData, TokenStringPacket, TokenUuidPacket};
 use crate::server::{auth::verify_token, COMMENTS_TREE, DATABASE_PATH};
 use anyhow::Result;
 use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
-use time::OffsetDateTime;
+use time::{format_description, OffsetDateTime};
 use uuid::Uuid;
 
 pub async fn add_comment(packet: Bytes) -> impl IntoResponse {
@@ -21,13 +21,18 @@ pub async fn add_comment(packet: Bytes) -> impl IntoResponse {
     // Store a new database entry
     let result = (|| -> Result<()> {
         let id = Uuid::new_v4();
+        let datetime = OffsetDateTime::now_utc();
+        let format = format_description::parse("[day]/[month]/[year] [hour]:[minute]")?;
+        let datetime_text = datetime.format(&format)?;
+
         sled::open(DATABASE_PATH)?
             .open_tree(COMMENTS_TREE)?
             .insert(
                 id,
                 bincode::serialize(&CommentData {
                     id,
-                    datetime: OffsetDateTime::now_utc(),
+                    datetime,
+                    datetime_text,
                     comment: packet.string,
                 })?,
             )?;

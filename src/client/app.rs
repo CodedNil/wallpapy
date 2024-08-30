@@ -1,6 +1,7 @@
 use crate::{
     client::networking::{
-        add_comment, generate_wallpaper, get_gallery, like_image, login, remove_image,
+        add_comment, generate_wallpaper, get_gallery, like_image, login, remove_comment,
+        remove_image,
     },
     common::{CommentData, DatabaseObjectType, GetWallpapersResponse, LikedState, WallpaperData},
     PORT,
@@ -16,17 +17,14 @@ use egui_thumbhash::ThumbhashImage;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use time::{format_description, OffsetDateTime};
-
-use super::networking::remove_comment;
 
 nestify::nest! {
     pub struct Wallpapy {
         host: String,
         toasts: Arc<Mutex<Toasts>>,
 
-        gallery: Option<(Vec<WallpaperData>, OffsetDateTime)>,
-        comments: Option<(Vec<CommentData>, OffsetDateTime)>,
+        gallery: Option<Vec<WallpaperData>>,
+        comments: Option<Vec<CommentData>>,
 
         #>[derive(Deserialize, Serialize, Default)]
         #>[serde(default)]
@@ -168,16 +166,8 @@ impl Wallpapy {
 
         egui_extras::install_image_loaders(ctx);
         egui::CentralPanel::default().show(ctx, |ui| {
-            let wallpapers = self
-                .gallery
-                .as_ref()
-                .map(|(w, _)| w.clone())
-                .unwrap_or_default();
-            let comments = self
-                .comments
-                .as_ref()
-                .map(|(w, _)| w.clone())
-                .unwrap_or_default();
+            let wallpapers = self.gallery.clone().unwrap_or_default();
+            let comments = self.comments.clone().unwrap_or_default();
 
             // Collect the wallpapers and comments into a single list, sorted by datetime
             let mut combined_list = wallpapers
@@ -262,11 +252,8 @@ impl Wallpapy {
         let painter = ui.painter();
 
         // Draw date in top-left corner
-        let format = format_description::parse("[day]/[month]/[year] [hour]:[minute]").unwrap();
-        let datetime_text = wallpaper.datetime.format(&format).unwrap();
-
         let datetime_galley = painter.layout_no_wrap(
-            datetime_text,
+            wallpaper.datetime_text.clone(),
             FontId::proportional(ui_scale),
             Color32::WHITE.gamma_multiply(0.8),
         );
@@ -451,11 +438,8 @@ impl Wallpapy {
         ));
 
         // Draw date in top-left corner
-        let format = format_description::parse("[day]/[month]/[year] [hour]:[minute]").unwrap();
-        let datetime_text = comment.datetime.format(&format).unwrap();
-
         let datetime_galley = painter.layout_no_wrap(
-            datetime_text,
+            comment.datetime_text.clone(),
             FontId::proportional(ui_scale),
             Color32::WHITE.gamma_multiply(0.8),
         );
@@ -542,9 +526,8 @@ impl Wallpapy {
             GetGalleryState::Done(ref response) => {
                 match response {
                     Ok(wallpapers) => {
-                        let datetime = OffsetDateTime::now_utc();
-                        self.gallery = Some((wallpapers.images.clone(), datetime));
-                        self.comments = Some((wallpapers.comments.clone(), datetime));
+                        self.gallery = Some(wallpapers.images.clone());
+                        self.comments = Some(wallpapers.comments.clone());
                     }
                     Err(e) => {
                         log::error!("Failed to fetch galleries: {:?}", e);

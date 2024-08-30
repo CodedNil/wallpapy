@@ -10,7 +10,10 @@ use reqwest::Client;
 use serde_json::json;
 use std::{env, path::Path, time::Duration};
 use thumbhash::rgba_to_thumb_hash;
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+use time::{
+    format_description::{self, well_known::Rfc3339},
+    OffsetDateTime,
+};
 use tokio::fs;
 use uuid::Uuid;
 
@@ -131,6 +134,8 @@ async fn generate_wallpaper_impl() -> Result<()> {
 
     let id = Uuid::new_v4();
     let datetime = OffsetDateTime::now_utc();
+    let format = format_description::parse("[day]/[month]/[year] [hour]:[minute]")?;
+    let datetime_text = datetime.format(&format)?;
 
     // Generate image
     let prompt = prompt::generate().await?;
@@ -154,6 +159,7 @@ async fn generate_wallpaper_impl() -> Result<()> {
     let image_data = WallpaperData {
         id,
         datetime,
+        datetime_text,
         prompt,
         file_name,
         width,

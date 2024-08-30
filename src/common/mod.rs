@@ -42,6 +42,7 @@ pub enum DatabaseObjectType {
 pub struct WallpaperData {
     pub id: Uuid,
     pub datetime: OffsetDateTime,
+    pub datetime_text: String,
     pub prompt: String,
     pub file_name: String,
     pub width: u32,
@@ -54,6 +55,7 @@ pub struct WallpaperData {
 pub struct CommentData {
     pub id: Uuid,
     pub datetime: OffsetDateTime,
+    pub datetime_text: String,
     pub comment: String,
 }
 
