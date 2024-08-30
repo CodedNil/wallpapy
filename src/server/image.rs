@@ -69,6 +69,33 @@ pub async fn get() -> impl IntoResponse {
     StatusCode::INTERNAL_SERVER_ERROR.into_response()
 }
 
+pub async fn latest() -> impl IntoResponse {
+    match sled::open(DATABASE_PATH).and_then(|db| db.open_tree(IMAGES_TREE)) {
+        Ok(images_tree) => {
+            if let Some(file_name) = images_tree
+                .iter()
+                .values()
+                .filter_map(|v| v.ok().and_then(|bytes| bincode::deserialize(&bytes).ok()))
+                .max_by_key(|wallpaper: &WallpaperData| wallpaper.datetime)
+                .map(|image| image.file_name)
+            {
+                let image_data = std::fs::read(Path::new("wallpapers").join(&file_name));
+                match image_data {
+                    Ok(data) => {
+                        return (StatusCode::OK, data).into_response();
+                    }
+                    Err(e) => {
+                        log::error!("Failed to read image file: {:?}", e);
+                    }
+                }
+            }
+        }
+        Err(e) => log::error!("{:?}", e),
+    };
+
+    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+}
+
 pub async fn remove(packet: Bytes) -> impl IntoResponse {
     let packet: TokenUuidPacket = match bincode::deserialize(&packet) {
         Ok(packet) => packet,

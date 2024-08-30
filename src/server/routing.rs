@@ -11,6 +11,7 @@ use axum::{
 pub fn setup_routes(app: Router) -> Router {
     app.route("/login", post(login_server))
         .route("/get", get(image::get))
+        .route("/latest", get(image::latest))
         .route("/generate", post(image::generate))
         .route("/commentadd", post(add_comment))
         .route("/commentremove", post(remove_comment))
