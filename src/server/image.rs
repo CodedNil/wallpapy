@@ -1,13 +1,13 @@
 use crate::common::{
     CommentData, GetWallpapersResponse, ImageFile, LikedState, TokenStringPacket,
-    TokenUuidLikedPacket, TokenUuidPacket, UpscaleState, WallpaperData, WallpaperImageType,
+    TokenUuidLikedPacket, TokenUuidPacket, WallpaperData,
 };
 use crate::server::{auth::verify_token, prompt, COMMENTS_TREE, DATABASE_PATH, IMAGES_TREE};
 use anyhow::{anyhow, Result};
 use axum::http::{HeaderMap, HeaderValue};
 use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use image::{imageops, DynamicImage, ExtendedColorType, ImageReader};
+use image::{imageops, DynamicImage, GenericImageView, ImageReader, Pixel};
 use rand::seq::SliceRandom;
 use reqwest::Client;
 use serde_json::json;
@@ -36,7 +36,7 @@ pub async fn generate(packet: Bytes) -> impl IntoResponse {
         return StatusCode::UNAUTHORIZED;
     }
 
-    match generate_wallpaper_impl("", &packet.string).await {
+    match generate_wallpaper_impl(None, Some(packet.string)).await {
         Ok(()) => StatusCode::OK,
         Err(e) => {
             log::error!("Failed to generate wallpaper: {:?}", e);
@@ -235,7 +235,7 @@ pub async fn recreate(packet: Bytes) -> impl IntoResponse {
     }
 
     // Set the vote state
-    let result = (|| -> Result<String> {
+    let result = (|| -> Result<(String, String)> {
         let tree = sled::open(DATABASE_PATH)?.open_tree(IMAGES_TREE)?;
 
         let wallpaper_data: WallpaperData = bincode::deserialize(
@@ -243,12 +243,12 @@ pub async fn recreate(packet: Bytes) -> impl IntoResponse {
                 .get(packet.uuid)?
                 .ok_or_else(|| anyhow::anyhow!("Image not found"))?,
         )?;
-        Ok(wallpaper_data.prompt)
+        Ok((wallpaper_data.prompt, wallpaper_data.prompt_short))
     })();
 
     match result {
-        Ok(prompt) => {
-            if (generate_wallpaper_impl(&prompt, "").await).is_err() {
+        Ok((prompt, prompt_short)) => {
+            if (generate_wallpaper_impl(Some((prompt, prompt_short)), None).await).is_err() {
                 log::error!("Failed to recreate image");
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
             }
@@ -261,7 +261,10 @@ pub async fn recreate(packet: Bytes) -> impl IntoResponse {
     }
 }
 
-pub async fn generate_wallpaper_impl(prompt: &str, message: &str) -> Result<()> {
+pub async fn generate_wallpaper_impl(
+    prompt: Option<(String, String)>,
+    message: Option<String>,
+) -> Result<()> {
     log::info!("Generating wallpaper");
 
     let id = Uuid::new_v4();
@@ -270,12 +273,12 @@ pub async fn generate_wallpaper_impl(prompt: &str, message: &str) -> Result<()> 
     let datetime_text = datetime.format(&format)?;
 
     // Generate image prompt
-    let prompt = if prompt.is_empty() {
-        let new = prompt::generate(message).await?;
-        log::info!("Generated prompt: {}", new);
-        new
+    let (prompt, prompt_short) = if let Some((p1, p2)) = prompt {
+        (p1, p2)
     } else {
-        prompt.to_string()
+        let new = prompt::generate(message).await?;
+        log::info!("Generated prompt: {}", new.0);
+        new
     };
 
     // Generate image
@@ -284,16 +287,6 @@ pub async fn generate_wallpaper_impl(prompt: &str, message: &str) -> Result<()> 
         env::var("REPLICATE_API_TOKEN").expect("REPLICATE_API_TOKEN environment variable not set");
     let (image_url, image) = image_diffusion(&client, &api_token, &prompt).await?;
     log::info!("Generated image: {}", &image_url);
-
-    // Upscale the image using Real-ESRGAN
-    let (upscaled_url, upscaled_image) = upscale_image(&client, &api_token, &image_url).await?;
-    log::info!("Upscaled image: {}", &upscaled_url);
-    // If upscaled image is larger than 3840x2160 downscale it
-    let upscaled_image = if upscaled_image.width() > 4096 || upscaled_image.height() > 4096 {
-        upscaled_image.resize_to_fill(3820, 2160, imageops::FilterType::Lanczos3)
-    } else {
-        upscaled_image
-    };
 
     // Resize the image to thumbnail
     let thumbnail = image.thumbnail(32, 32);
@@ -311,44 +304,41 @@ pub async fn generate_wallpaper_impl(prompt: &str, message: &str) -> Result<()> 
 
     // Save the original image
     let file_name = format!("{datetime_str}.webp");
-    {
-        let file_writer = std::fs::File::create(dir.join(&file_name))?;
-        let encoder = image::codecs::webp::WebPEncoder::new_lossless(file_writer);
-        encoder.encode(
-            &image.to_rgba8(),
-            image.width(),
-            image.height(),
-            ExtendedColorType::Rgba8,
-        )?;
-    }
+    image.save(dir.join(&file_name))?;
     let original_file = ImageFile {
         file_name,
         width: image.width(),
         height: image.height(),
     };
 
-    // Save the upscaled image
-    let upscaled_file_name = format!("{datetime_str}_upscaled.webp");
-    {
-        let encoder = webp::Encoder::from_image(&upscaled_image).unwrap();
-        let webp = encoder.encode(90.0);
-        std::fs::write(dir.join(&upscaled_file_name), &*webp)?;
-    }
-    let upscaled_file = Some(ImageFile {
-        file_name: upscaled_file_name,
-        width: upscaled_image.width(),
-        height: upscaled_image.height(),
-    });
+    // Downscale to 480p and save as thumbnail file
+    let thumb_image = image.resize_to_fill(854, 480, imageops::FilterType::Lanczos3);
+    let thumb_file_name = format!("{datetime_str}_thumb.webp");
+    thumb_image.save(dir.join(&thumb_file_name))?;
+    let thumbnail_file = ImageFile {
+        file_name: thumb_file_name,
+        width: thumb_image.width(),
+        height: thumb_image.height(),
+    };
+
+    // Calculate average color and brightness
+    let (average_color, brightness) = calculate_average_color_and_brightness(&thumb_image);
 
     let wallpaper_data = WallpaperData {
         id,
-        image_type: WallpaperImageType::Desktop16x9,
+
         datetime,
         datetime_text,
+
         prompt,
+        prompt_short,
         original_file,
-        upscaled_file,
-        upscale_state: UpscaleState::Basic,
+        upscaled_file: None,
+
+        average_color,
+        brightness,
+
+        thumbnail_file,
         thumbhash,
         liked_state: LikedState::None,
     };
@@ -365,7 +355,7 @@ pub async fn generate_wallpaper_impl(prompt: &str, message: &str) -> Result<()> 
 }
 
 pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper_data: WallpaperData) -> Result<()> {
-    log::info!("Upscaling wallpaper quality {id}");
+    log::info!("Upscaling wallpaper {id}");
 
     // Prepare client
     let client = Client::new();
@@ -378,42 +368,42 @@ pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper_data: WallpaperData) -> 
 
     // Upscale the image using the high quality upscaler
     let (upscaled_url, upscaled_image) =
-        upscale_image_quality(&client, &api_token, &image, &wallpaper_data.prompt).await?;
+        upscale_image(&client, &api_token, &image, &wallpaper_data.prompt).await?;
     log::info!("Upscaled image: {}", &upscaled_url);
-    // If upscaled image is larger than 3840x2160 downscale it
-    let upscaled_image = if upscaled_image.width() > 4096 || upscaled_image.height() > 4096 {
-        upscaled_image.resize_to_fill(3820, 2160, imageops::FilterType::Lanczos3)
-    } else {
-        upscaled_image
-    };
+    let upscaled_image = upscaled_image.resize_to_fill(3820, 2160, imageops::FilterType::Lanczos3);
 
     // Save to file
     let dir = Path::new("wallpapers");
     fs::create_dir_all(dir).await?;
-
     let datetime_str = wallpaper_data.datetime.format(&Rfc3339)?;
 
     // Save the upscaled image
-    let upscaled_file_name = format!("{datetime_str}_upscaled_quality.webp");
-    {
-        let encoder = webp::Encoder::from_image(&upscaled_image).unwrap();
-        let webp = encoder.encode(90.0);
-        std::fs::write(dir.join(&upscaled_file_name), &*webp)?;
-    }
+    let upscaled_file_name = format!("{datetime_str}_upscaled.webp");
+    upscaled_image.save(dir.join(&upscaled_file_name))?;
     let upscaled_file = Some(ImageFile {
         file_name: upscaled_file_name,
         width: upscaled_image.width(),
         height: upscaled_image.height(),
     });
 
-    // Remove the old upscaled image
-    if let Some(old_upscaled_file) = &wallpaper_data.upscaled_file {
-        fs::remove_file(dir.join(&old_upscaled_file.file_name)).await?;
-    }
+    // Downscale to 480p and save as thumbnail file
+    let thumb_image = upscaled_image.resize_to_fill(854, 480, imageops::FilterType::Lanczos3);
+    let thumb_file_name = format!("{datetime_str}_thumb.webp");
+    thumb_image.save(dir.join(&thumb_file_name))?;
+    let thumbnail_file = ImageFile {
+        file_name: thumb_file_name,
+        width: thumb_image.width(),
+        height: thumb_image.height(),
+    };
+
+    // Calculate average color and brightness
+    let (average_color, brightness) = calculate_average_color_and_brightness(&thumb_image);
 
     let wallpaper_data = WallpaperData {
         upscaled_file,
-        upscale_state: UpscaleState::Quality,
+        average_color,
+        brightness,
+        thumbnail_file,
         ..wallpaper_data
     };
 
@@ -426,6 +416,33 @@ pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper_data: WallpaperData) -> 
         .map_err(|e| anyhow!("Failed to insert into tree: {:?}", e))?;
 
     Ok(())
+}
+
+fn calculate_average_color_and_brightness(img: &DynamicImage) -> ((u8, u8, u8), u8) {
+    let (width, height) = img.dimensions();
+    let total_pixels = (width * height) as f32;
+
+    // Sum up all the RGB values
+    let (sum_r, sum_g, sum_b) = img.pixels().fold(
+        (0u64, 0u64, 0u64),
+        |(acc_r, acc_g, acc_b), (_, _, pixel)| {
+            let [r, g, b] = pixel.to_rgb().0;
+            (
+                acc_r + u64::from(r),
+                acc_g + u64::from(g),
+                acc_b + u64::from(b),
+            )
+        },
+    );
+
+    let avg_r = sum_r as f32 / total_pixels;
+    let avg_g = sum_g as f32 / total_pixels;
+    let avg_b = sum_b as f32 / total_pixels;
+
+    // Use the weighted sum formula for perceived brightness
+    let brightness = 0.299f32.mul_add(avg_r, 0.587f32.mul_add(avg_g, 0.114 * avg_b)) as u8;
+
+    ((avg_r as u8, avg_g as u8, avg_b as u8), brightness)
 }
 
 async fn remove_wallpaper_impl(packet: TokenUuidPacket) -> Result<()> {
@@ -475,36 +492,7 @@ async fn image_diffusion(
                 "num_outputs": 1,
                 "aspect_ratio": "16:9",
                 "output_format": "png",
-                "output_quality": 80
-            }
-        }),
-    )
-    .await?;
-
-    let img_data = client.get(&result_url).send().await?.bytes().await?;
-    let img = ImageReader::new(Cursor::new(img_data))
-        .with_guessed_format()?
-        .decode()?;
-
-    Ok((result_url, img))
-}
-
-/// <https://replicate.com/nightmareai/real-esrgan>
-async fn upscale_image(
-    client: &Client,
-    api_token: &str,
-    image_url: &str,
-) -> Result<(String, DynamicImage)> {
-    let result_url = replicate_request_prediction(
-        client,
-        api_token,
-        "",
-        &json!({
-            "version": "f121d640bd286e1fdc67f9799164c1d5be36ff74576ee11c803ae5b665dd46aa",
-            "input": {
-                "image": image_url,
-                "scale": 4,
-                "face_enhance": false
+                "output_quality": 100
             }
         }),
     )
@@ -519,7 +507,7 @@ async fn upscale_image(
 }
 
 /// <https://replicate.com/philz1337x/clarity-upscaler>
-async fn upscale_image_quality(
+async fn upscale_image(
     client: &Client,
     api_token: &str,
     image: &DynamicImage,

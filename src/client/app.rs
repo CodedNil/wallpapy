@@ -9,7 +9,7 @@ use crate::{
 use anyhow::Result;
 use egui::{
     vec2, Align2, CentralPanel, Color32, Context, CursorIcon, FontId, Frame, Image, PointerButton,
-    Rect, ScrollArea, Sense, Shape, TextEdit, Vec2, Widget, Window,
+    Rect, RichText, ScrollArea, Sense, Shape, TextEdit, Vec2, Widget, Window,
 };
 use egui_notify::Toasts;
 use egui_pull_to_refresh::PullToRefresh;
@@ -175,9 +175,12 @@ impl Wallpapy {
                         "http://{}/wallpapers/{}",
                         self.host, file.file_name
                     ))
-                    .maintain_aspect_ratio(true)
+                    .show_loading_spinner(false)
+                    .rounding(16.0)
                     .ui(ui);
-                    ui.label(wallpaper.prompt.to_string());
+                    ui.label(
+                        RichText::new(wallpaper.prompt.clone()).font(FontId::proportional(20.0)),
+                    )
                 });
                 // If escape pressed, close the fullscreen image
                 if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -239,6 +242,8 @@ impl Wallpapy {
                 });
                 if refresh_response.should_refresh() {
                     self.network_data.lock().get_gallery = GetGalleryState::Wanted;
+                    ui.ctx().forget_all_images();
+                    ui.ctx().clear_animations();
                 }
             }
         });
@@ -251,27 +256,24 @@ impl Wallpapy {
         width: f32,
         height: f32,
     ) {
-        let file_name = wallpaper.upscaled_file.as_ref().map_or_else(
-            || wallpaper.original_file.file_name.clone(),
-            |upscaled_file| upscaled_file.file_name.clone(),
-        );
-
         // Only render images if they are visible (this is basically lazy loading)
         let image_size = Vec2::new(width, height);
-        let image_rect = if ui
-            .is_rect_visible(Rect::from_min_size(ui.next_widget_position(), image_size))
-        {
-            let image = egui::Image::new(format!("http://{}/wallpapers/{}", self.host, file_name))
+        let image_rect =
+            if ui.is_rect_visible(Rect::from_min_size(ui.next_widget_position(), image_size)) {
+                let image = egui::Image::new(format!(
+                    "http://{}/wallpapers/{}",
+                    self.host, wallpaper.thumbnail_file.file_name
+                ))
                 .show_loading_spinner(false);
-            ui.add_sized(
-                image_size,
-                ThumbhashImage::new(image, &wallpaper.thumbhash).rounding(16.0),
-            )
-            .rect
-        } else {
-            let (rect, _) = ui.allocate_exact_size(image_size, Sense::hover());
-            rect
-        };
+                ui.add_sized(
+                    image_size,
+                    ThumbhashImage::new(image, &wallpaper.thumbhash).rounding(16.0),
+                )
+                .rect
+            } else {
+                let (rect, _) = ui.allocate_exact_size(image_size, Sense::hover());
+                rect
+            };
 
         // Start painting
         let ui_scale = 12.0;
@@ -294,6 +296,27 @@ impl Wallpapy {
             Color32::BLACK.gamma_multiply(0.8),
         ));
         painter.galley(datetime_rect.min, datetime_galley, Color32::WHITE);
+
+        // Draw average brightness and color below date
+        let colorinfo_galley = painter.layout_no_wrap(
+            format!("{:.0}%", f32::from(wallpaper.brightness) / 255.0 * 100.0,),
+            FontId::proportional(ui_scale),
+            Color32::WHITE,
+        );
+        let colorinfo_rect = egui::Align2::LEFT_TOP.anchor_size(
+            datetime_rect.left_bottom() + vec2(0.0, 15.0),
+            colorinfo_galley.size(),
+        );
+        painter.add(Shape::rect_filled(
+            colorinfo_rect.expand(ui_scale * 0.5),
+            ui_scale,
+            Color32::from_rgb(
+                wallpaper.average_color.0,
+                wallpaper.average_color.1,
+                wallpaper.average_color.2,
+            ),
+        ));
+        painter.galley(colorinfo_rect.min, colorinfo_galley, Color32::WHITE);
 
         // Add delete button in top-right corner
         let delete_button_size = vec2(ui_scale.mul_add(2.0, 2.0), ui_scale.mul_add(2.0, 2.0));
@@ -442,28 +465,28 @@ impl Wallpapy {
             }
         }
 
-        // // Draw prompt in bottom center
-        // let prompt_galley = painter.layout(
-        //     wallpaper.prompt.clone(),
-        //     FontId::proportional(ui_scale),
-        //     Color32::WHITE.gamma_multiply(0.8),
-        //     width - 40.0,
-        // );
-        // let prompt_rect = egui::Align2::CENTER_BOTTOM.anchor_size(
-        //     image_rect.center_bottom() + vec2(0.0, -20.0),
-        //     prompt_galley.size(),
-        // );
-        // painter.add(Shape::rect_filled(
-        //     prompt_rect.expand(ui_scale * 0.5625),
-        //     ui_scale,
-        //     match wallpaper.liked_state {
-        //         LikedState::Liked => Color32::from_rgb(160, 100, 0),
-        //         LikedState::Disliked => Color32::DARK_RED,
-        //         LikedState::None => Color32::BLACK,
-        //     }
-        //     .gamma_multiply(0.8),
-        // ));
-        // painter.galley(prompt_rect.min, prompt_galley, Color32::WHITE);
+        // Draw shortened prompt in bottom center
+        let prompt_galley = painter.layout(
+            wallpaper.prompt_short.clone(),
+            FontId::proportional(ui_scale),
+            Color32::WHITE.gamma_multiply(0.8),
+            width - 40.0,
+        );
+        let prompt_rect = egui::Align2::CENTER_BOTTOM.anchor_size(
+            image_rect.center_bottom() + vec2(0.0, -20.0),
+            prompt_galley.size(),
+        );
+        painter.add(Shape::rect_filled(
+            prompt_rect.expand(ui_scale * 0.5625),
+            ui_scale,
+            match wallpaper.liked_state {
+                LikedState::Liked => Color32::from_rgb(160, 100, 0),
+                LikedState::Disliked => Color32::DARK_RED,
+                LikedState::None => Color32::BLACK,
+            }
+            .gamma_multiply(0.8),
+        ));
+        painter.galley(prompt_rect.min, prompt_galley, Color32::WHITE);
 
         // Check if image is clicked
         let is_hovering = ui.rect_contains_pointer(image_rect);

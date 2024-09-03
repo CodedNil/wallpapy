@@ -1,7 +1,8 @@
 use crate::common::{CommentData, DatabaseObjectType, LikedState, WallpaperData};
 use crate::server::{COMMENTS_TREE, DATABASE_PATH, IMAGES_TREE};
 use anyhow::{anyhow, Result};
-use serde_json::json;
+use reqwest::Client;
+use serde_json::{json, Value};
 use std::env;
 use time::format_description;
 
@@ -138,7 +139,7 @@ Common Pitfalls to Avoid
     Forgetting About Style: Unless specified, FLUX.1 may default to a realistic style. Always indicate if you want a particular artistic approach.
 ";
 
-pub async fn generate(message: &str) -> Result<String> {
+pub async fn generate(message: Option<String>) -> Result<(String, String)> {
     let database_history = match sled::open(DATABASE_PATH)
         .and_then(|db| Ok((db.clone(), db.open_tree(IMAGES_TREE)?)))
         .and_then(|(db, images_tree)| Ok((images_tree, db.open_tree(COMMENTS_TREE)?)))
@@ -201,7 +202,7 @@ pub async fn generate(message: &str) -> Result<String> {
         });
         history_string.push('\n');
     }
-    if !message.is_empty() {
+    if let Some(message) = message {
         history_string.push_str(&format!("For this image the user requested: '{message}'"));
         history_string.push('\n');
     }
@@ -209,7 +210,8 @@ pub async fn generate(message: &str) -> Result<String> {
     let client = reqwest::Client::new();
 
     let api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
-    let request_body = json!({
+
+    let prompt = gpt(&client, &api_key, json!({
         "model": "gpt-4o-mini",
         "messages": [
             {
@@ -219,7 +221,7 @@ pub async fn generate(message: &str) -> Result<String> {
             },
             {
                 "role": "system",
-                "content": "You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines, follow the prompt guidelines for best results"
+                "content": "You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines, follow the prompt guidelines for best results, always specify no watermark/signature, and prioritise users comments as feedback"
             },
             {
                 "role": "system",
@@ -232,7 +234,23 @@ pub async fn generate(message: &str) -> Result<String> {
             }
         ],
         "max_tokens": 4096
-    });
+    })).await?;
+
+    let prompt_short = gpt(&client, &api_key, json!({
+        "model": "gpt-4o-mini",
+        "messages": [
+            {
+                "role": "user",
+                "content": format!("Take this input '{prompt}' and return a shortened version of it, max 12 words")
+            }
+        ],
+        "max_tokens": 4096
+    })).await?;
+
+    Ok((prompt, prompt_short))
+}
+
+async fn gpt(client: &Client, api_key: &str, request_body: Value) -> Result<String> {
     let response = client
         .post("https://api.openai.com/v1/chat/completions")
         .header("Content-Type", "application/json")
@@ -241,7 +259,7 @@ pub async fn generate(message: &str) -> Result<String> {
         .send()
         .await?;
 
-    let response_json: serde_json::Value = response.json().await?;
+    let response_json: Value = response.json().await?;
     response_json["choices"]
         .get(0)
         .and_then(|choice| choice["message"]["content"].as_str())

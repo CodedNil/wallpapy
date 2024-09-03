@@ -41,14 +41,21 @@ pub enum DatabaseObjectType {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct WallpaperData {
     pub id: Uuid,
-    pub image_type: WallpaperImageType,
+
     pub datetime: OffsetDateTime,
     pub datetime_text: String,
+
     pub prompt: String,
+    pub prompt_short: String,
     pub original_file: ImageFile,
     pub upscaled_file: Option<ImageFile>,
-    pub upscale_state: UpscaleState,
+
+    pub average_color: (u8, u8, u8),
+    pub brightness: u8,
+
+    pub thumbnail_file: ImageFile,
     pub thumbhash: Vec<u8>,
+
     pub liked_state: LikedState,
 }
 
@@ -78,17 +85,4 @@ pub enum LikedState {
     None,
     Liked,
     Disliked,
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
-pub enum WallpaperImageType {
-    Desktop16x9,
-    Mobile,
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
-pub enum UpscaleState {
-    None,
-    Basic,
-    Quality,
 }
