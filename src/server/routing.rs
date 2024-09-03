@@ -18,11 +18,13 @@ pub fn setup_routes(app: Router) -> Router {
     app.route("/login", post(login_server))
         .route("/get", get(image::get))
         .route("/latest", get(image::latest))
+        .route("/favourites", get(image::favourites))
         .route("/generate", post(image::generate))
         .route("/commentadd", post(add_comment))
         .route("/commentremove", post(remove_comment))
         .route("/imageliked", post(image::like))
         .route("/imageremove", post(image::remove))
+        .route("/imagerecreate", post(image::recreate))
 }
 
 pub async fn start_server() {
@@ -37,7 +39,7 @@ pub async fn start_server() {
                     .max_by_key(|wallpaper: &WallpaperData| wallpaper.datetime)
                     .map_or(cur_time, |image| image.datetime);
                 if cur_time - latest_time > NEW_WALLPAPER_INTERVAL {
-                    if let Err(err) = image::generate_wallpaper_impl().await {
+                    if let Err(err) = image::generate_wallpaper_impl("", "").await {
                         log::error!("Error generating wallpaper: {:?}", err);
                     }
                 }

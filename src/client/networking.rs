@@ -1,6 +1,6 @@
 use crate::common::{
-    GetWallpapersResponse, LikedState, LoginPacket, TokenPacket, TokenStringPacket,
-    TokenUuidLikedPacket, TokenUuidPacket,
+    GetWallpapersResponse, LikedState, LoginPacket, TokenStringPacket, TokenUuidLikedPacket,
+    TokenUuidPacket,
 };
 use anyhow::Result;
 use uuid::Uuid;
@@ -43,13 +43,15 @@ pub fn login(
 pub fn generate_wallpaper(
     host: &str,
     token: &str,
+    message: &str,
     on_done: impl 'static + Send + FnOnce(Result<()>),
 ) {
     ehttp::fetch(
         ehttp::Request::post(
             &format!("http://{host}/generate"),
-            bincode::serialize(&TokenPacket {
+            bincode::serialize(&TokenStringPacket {
                 token: token.to_string(),
+                string: message.to_string(),
             })
             .unwrap(),
         ),
@@ -158,6 +160,27 @@ pub fn remove_image(
     ehttp::fetch(
         ehttp::Request::post(
             &format!("http://{host}/imageremove"),
+            bincode::serialize(&TokenUuidPacket {
+                token: token.to_string(),
+                uuid: *image_id,
+            })
+            .unwrap(),
+        ),
+        Box::new(move |_| {
+            on_done(Ok(()));
+        }),
+    );
+}
+
+pub fn recreate_image(
+    host: &str,
+    token: &str,
+    image_id: &Uuid,
+    on_done: impl 'static + Send + FnOnce(Result<()>),
+) {
+    ehttp::fetch(
+        ehttp::Request::post(
+            &format!("http://{host}/imagerecreate"),
             bincode::serialize(&TokenUuidPacket {
                 token: token.to_string(),
                 uuid: *image_id,

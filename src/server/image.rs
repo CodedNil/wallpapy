@@ -1,14 +1,17 @@
 use crate::common::{
-    CommentData, GetWallpapersResponse, ImageFile, LikedState, TokenPacket, TokenUuidLikedPacket,
-    TokenUuidPacket, UpscaleState, WallpaperData, WallpaperImageType,
+    CommentData, GetWallpapersResponse, ImageFile, LikedState, TokenStringPacket,
+    TokenUuidLikedPacket, TokenUuidPacket, UpscaleState, WallpaperData, WallpaperImageType,
 };
 use crate::server::{auth::verify_token, prompt, COMMENTS_TREE, DATABASE_PATH, IMAGES_TREE};
 use anyhow::{anyhow, Result};
 use axum::http::{HeaderMap, HeaderValue};
 use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use image::{imageops, DynamicImage, ExtendedColorType, ImageReader};
+use rand::seq::SliceRandom;
 use reqwest::Client;
 use serde_json::json;
+use std::io::Cursor;
 use std::{env, path::Path, time::Duration};
 use thumbhash::rgba_to_thumb_hash;
 use time::{
@@ -18,10 +21,10 @@ use time::{
 use tokio::fs;
 use uuid::Uuid;
 
-const TIMEOUT: u64 = 40;
+const TIMEOUT: u64 = 180;
 
 pub async fn generate(packet: Bytes) -> impl IntoResponse {
-    let packet: TokenPacket = match bincode::deserialize(&packet) {
+    let packet: TokenStringPacket = match bincode::deserialize(&packet) {
         Ok(packet) => packet,
         Err(e) => {
             log::error!("Failed to deserialize generate_wallpaper packet: {:?}", e);
@@ -33,7 +36,7 @@ pub async fn generate(packet: Bytes) -> impl IntoResponse {
         return StatusCode::UNAUTHORIZED;
     }
 
-    match generate_wallpaper_impl().await {
+    match generate_wallpaper_impl("", &packet.string).await {
         Ok(()) => StatusCode::OK,
         Err(e) => {
             log::error!("Failed to generate wallpaper: {:?}", e);
@@ -78,13 +81,55 @@ pub async fn latest() -> impl IntoResponse {
                 .values()
                 .filter_map(|v| v.ok().and_then(|bytes| bincode::deserialize(&bytes).ok()))
                 .max_by_key(|wallpaper: &WallpaperData| wallpaper.datetime)
-                .map(|image| {
-                    image.upscaled_file.as_ref().map_or_else(
-                        || image.original_file.file_name.clone(),
+                .map(|wallpaper_data| {
+                    wallpaper_data.upscaled_file.as_ref().map_or_else(
+                        || wallpaper_data.original_file.file_name.clone(),
                         |upscaled_file| upscaled_file.file_name.clone(),
                     )
                 })
             {
+                let image_path = Path::new("wallpapers").join(&file_name);
+                if let Ok(data) = std::fs::read(&image_path) {
+                    let mime_type = mime_guess::from_path(&image_path).first_or_octet_stream();
+                    let mut headers = HeaderMap::new();
+                    headers.insert(
+                        "Content-Type",
+                        HeaderValue::from_str(mime_type.as_ref()).unwrap(),
+                    );
+
+                    return (StatusCode::OK, headers, data).into_response();
+                }
+            }
+        }
+        Err(e) => log::error!("{:?}", e),
+    };
+
+    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+}
+
+pub async fn favourites() -> impl IntoResponse {
+    match sled::open(DATABASE_PATH).and_then(|db| db.open_tree(IMAGES_TREE)) {
+        Ok(images_tree) => {
+            let liked_images: Vec<_> = images_tree
+                .iter()
+                .values()
+                .filter_map(|v| {
+                    if let Ok(bytes) = v {
+                        if let Ok(wallpaper_data) = bincode::deserialize::<WallpaperData>(&bytes) {
+                            if matches!(wallpaper_data.liked_state, LikedState::Liked) {
+                                return Some(wallpaper_data);
+                            }
+                        }
+                    }
+                    None
+                })
+                .collect();
+
+            if let Some(wallpaper_data) = liked_images.choose(&mut rand::thread_rng()) {
+                let file_name = wallpaper_data.upscaled_file.as_ref().map_or_else(
+                    || wallpaper_data.original_file.file_name.clone(),
+                    |upscaled_file| upscaled_file.file_name.clone(),
+                );
                 let image_path = Path::new("wallpapers").join(&file_name);
                 if let Ok(data) = std::fs::read(&image_path) {
                     let mime_type = mime_guess::from_path(&image_path).first_or_octet_stream();
@@ -130,18 +175,17 @@ pub async fn like(packet: Bytes) -> impl IntoResponse {
     let packet: TokenUuidLikedPacket = match bincode::deserialize(&packet) {
         Ok(packet) => packet,
         Err(e) => {
-            log::error!("Failed to deserialize upvote_image packet: {:?}", e);
+            log::error!("Failed to deserialize like_image packet: {:?}", e);
             return StatusCode::BAD_REQUEST.into_response();
         }
     };
-
     if !matches!(verify_token(&packet.token), Ok(true)) {
-        log::error!("Unauthorized upvote_image request");
+        log::error!("Unauthorized like_image request");
         return StatusCode::UNAUTHORIZED.into_response();
     }
 
     // Set the vote state
-    let result = (|| -> Result<()> {
+    let result = (|| -> Result<WallpaperData> {
         let tree = sled::open(DATABASE_PATH)?.open_tree(IMAGES_TREE)?;
 
         let mut wallpaper_data: WallpaperData = bincode::deserialize(
@@ -149,22 +193,75 @@ pub async fn like(packet: Bytes) -> impl IntoResponse {
                 .get(packet.uuid)?
                 .ok_or_else(|| anyhow::anyhow!("Image not found"))?,
         )?;
-        wallpaper_data.vote_state = packet.liked;
+        if wallpaper_data.liked_state == packet.liked {
+            wallpaper_data.liked_state = LikedState::None;
+        } else {
+            wallpaper_data.liked_state = packet.liked;
+        }
         tree.insert(packet.uuid, bincode::serialize(&wallpaper_data)?)?;
 
-        Ok(())
+        Ok(wallpaper_data)
     })();
 
     match result {
-        Ok(()) => StatusCode::OK.into_response(),
+        Ok(wallpaper_data) => {
+            // Rerun the upscaling if the image was liked, with quality upscaler
+            if wallpaper_data.liked_state == LikedState::Liked {
+                tokio::spawn(async move {
+                    let _ = upscale_wallpaper_impl(packet.uuid, wallpaper_data).await;
+                });
+            }
+
+            StatusCode::OK.into_response()
+        }
         Err(e) => {
-            log::error!("Failed to upvote image: {:?}", e);
+            log::error!("Failed to like image: {:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
 }
 
-pub async fn generate_wallpaper_impl() -> Result<()> {
+pub async fn recreate(packet: Bytes) -> impl IntoResponse {
+    let packet: TokenUuidPacket = match bincode::deserialize(&packet) {
+        Ok(packet) => packet,
+        Err(e) => {
+            log::error!("Failed to deserialize like_image packet: {:?}", e);
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+    };
+    if !matches!(verify_token(&packet.token), Ok(true)) {
+        log::error!("Unauthorized like_image request");
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+
+    // Set the vote state
+    let result = (|| -> Result<String> {
+        let tree = sled::open(DATABASE_PATH)?.open_tree(IMAGES_TREE)?;
+
+        let wallpaper_data: WallpaperData = bincode::deserialize(
+            &tree
+                .get(packet.uuid)?
+                .ok_or_else(|| anyhow::anyhow!("Image not found"))?,
+        )?;
+        Ok(wallpaper_data.prompt)
+    })();
+
+    match result {
+        Ok(prompt) => {
+            if (generate_wallpaper_impl(&prompt, "").await).is_err() {
+                log::error!("Failed to recreate image");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+            StatusCode::OK.into_response()
+        }
+        Err(e) => {
+            log::error!("Failed to recreate image: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+pub async fn generate_wallpaper_impl(prompt: &str, message: &str) -> Result<()> {
     log::info!("Generating wallpaper");
 
     let id = Uuid::new_v4();
@@ -173,8 +270,13 @@ pub async fn generate_wallpaper_impl() -> Result<()> {
     let datetime_text = datetime.format(&format)?;
 
     // Generate image prompt
-    let prompt = prompt::generate().await?;
-    log::info!("Generated prompt: {}", prompt);
+    let prompt = if prompt.is_empty() {
+        let new = prompt::generate(message).await?;
+        log::info!("Generated prompt: {}", new);
+        new
+    } else {
+        prompt.to_string()
+    };
 
     // Generate image
     let client = Client::new();
@@ -238,7 +340,7 @@ pub async fn generate_wallpaper_impl() -> Result<()> {
         height: upscaled_image.height(),
     });
 
-    let image_data = WallpaperData {
+    let wallpaper_data = WallpaperData {
         id,
         image_type: WallpaperImageType::Desktop16x9,
         datetime,
@@ -248,7 +350,7 @@ pub async fn generate_wallpaper_impl() -> Result<()> {
         upscaled_file,
         upscale_state: UpscaleState::Basic,
         thumbhash,
-        vote_state: LikedState::None,
+        liked_state: LikedState::None,
     };
 
     // Store a new database entry
@@ -256,7 +358,71 @@ pub async fn generate_wallpaper_impl() -> Result<()> {
         .map_err(|e| anyhow!("Failed to open database: {:?}", e))?
         .open_tree(IMAGES_TREE)
         .map_err(|e| anyhow!("Failed to open tree: {:?}", e))?
-        .insert(id, bincode::serialize(&image_data)?)
+        .insert(id, bincode::serialize(&wallpaper_data)?)
+        .map_err(|e| anyhow!("Failed to insert into tree: {:?}", e))?;
+
+    Ok(())
+}
+
+pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper_data: WallpaperData) -> Result<()> {
+    log::info!("Upscaling wallpaper quality {id}");
+
+    // Prepare client
+    let client = Client::new();
+    let api_token =
+        env::var("REPLICATE_API_TOKEN").expect("REPLICATE_API_TOKEN environment variable not set");
+
+    // Open image file
+    let image_path = Path::new("wallpapers").join(wallpaper_data.original_file.file_name.clone());
+    let image = image::open(&image_path)?;
+
+    // Upscale the image using the high quality upscaler
+    let (upscaled_url, upscaled_image) =
+        upscale_image_quality(&client, &api_token, &image, &wallpaper_data.prompt).await?;
+    log::info!("Upscaled image: {}", &upscaled_url);
+    // If upscaled image is larger than 3840x2160 downscale it
+    let upscaled_image = if upscaled_image.width() > 4096 || upscaled_image.height() > 4096 {
+        upscaled_image.resize_to_fill(3820, 2160, imageops::FilterType::Lanczos3)
+    } else {
+        upscaled_image
+    };
+
+    // Save to file
+    let dir = Path::new("wallpapers");
+    fs::create_dir_all(dir).await?;
+
+    let datetime_str = wallpaper_data.datetime.format(&Rfc3339)?;
+
+    // Save the upscaled image
+    let upscaled_file_name = format!("{datetime_str}_upscaled_quality.webp");
+    {
+        let encoder = webp::Encoder::from_image(&upscaled_image).unwrap();
+        let webp = encoder.encode(90.0);
+        std::fs::write(dir.join(&upscaled_file_name), &*webp)?;
+    }
+    let upscaled_file = Some(ImageFile {
+        file_name: upscaled_file_name,
+        width: upscaled_image.width(),
+        height: upscaled_image.height(),
+    });
+
+    // Remove the old upscaled image
+    if let Some(old_upscaled_file) = &wallpaper_data.upscaled_file {
+        fs::remove_file(dir.join(&old_upscaled_file.file_name)).await?;
+    }
+
+    let wallpaper_data = WallpaperData {
+        upscaled_file,
+        upscale_state: UpscaleState::Quality,
+        ..wallpaper_data
+    };
+
+    // Update the database entry
+    sled::open(DATABASE_PATH)
+        .map_err(|e| anyhow!("Failed to open database: {:?}", e))?
+        .open_tree(IMAGES_TREE)
+        .map_err(|e| anyhow!("Failed to open tree: {:?}", e))?
+        .insert(id, bincode::serialize(&wallpaper_data)?)
         .map_err(|e| anyhow!("Failed to insert into tree: {:?}", e))?;
 
     Ok(())
@@ -299,7 +465,7 @@ async fn image_diffusion(
     api_token: &str,
     prompt: &str,
 ) -> Result<(String, DynamicImage)> {
-    let status_url = replicate_request_prediction(
+    let result_url = replicate_request_prediction(
         client,
         api_token,
         "black-forest-labs/flux-schnell",
@@ -314,14 +480,13 @@ async fn image_diffusion(
         }),
     )
     .await?;
-    let image_url = replicate_poll_status(client, api_token, &status_url).await?;
 
-    let img_data = client.get(&image_url).send().await?.bytes().await?;
-    let img = ImageReader::new(std::io::Cursor::new(img_data))
+    let img_data = client.get(&result_url).send().await?.bytes().await?;
+    let img = ImageReader::new(Cursor::new(img_data))
         .with_guessed_format()?
         .decode()?;
 
-    Ok((image_url, img))
+    Ok((result_url, img))
 }
 
 /// <https://replicate.com/nightmareai/real-esrgan>
@@ -330,7 +495,7 @@ async fn upscale_image(
     api_token: &str,
     image_url: &str,
 ) -> Result<(String, DynamicImage)> {
-    let status_url = replicate_request_prediction(
+    let result_url = replicate_request_prediction(
         client,
         api_token,
         "",
@@ -344,14 +509,60 @@ async fn upscale_image(
         }),
     )
     .await?;
-    let image_url = replicate_poll_status(client, api_token, &status_url).await?;
 
-    let img_data = client.get(&image_url).send().await?.bytes().await?;
-    let img = ImageReader::new(std::io::Cursor::new(img_data))
+    let img_data = client.get(&result_url).send().await?.bytes().await?;
+    let img = ImageReader::new(Cursor::new(img_data))
         .with_guessed_format()?
         .decode()?;
 
-    Ok((image_url, img))
+    Ok((result_url, img))
+}
+
+/// <https://replicate.com/philz1337x/clarity-upscaler>
+async fn upscale_image_quality(
+    client: &Client,
+    api_token: &str,
+    image: &DynamicImage,
+    prompt: &str,
+) -> Result<(String, DynamicImage)> {
+    let mut bytes = Vec::new();
+    image.write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)?;
+    let image_uri = format!(
+        "data:application/octet-stream;base64,{}",
+        STANDARD.encode(&bytes)
+    );
+
+    let result_url = replicate_request_prediction(
+        client,
+        api_token,
+        "",
+        &json!({
+            "version": "dfad41707589d68ecdccd1dfa600d55a208f9310748e44bfe35b4a6291453d5e",
+            "input": {
+                "image": image_uri,
+                "prompt": format!("masterpiece, best quality, highres, <lora:more_details:0.5> <lora:SDXLrender_v2.0:1>, {}", prompt),
+                "negative_prompt": "(worst quality, low quality, normal quality:2) JuggernautNegative-neg, ((signature))",
+                "dynamic": 6,
+                "handfix": "disabled",
+                "sharpen": 0,
+                "sd_model": "juggernaut_reborn.safetensors [338b85bc4f]",
+                "scheduler": "DPM++ 3M SDE Karras",
+                "creativity": 0.35,
+                "resemblance": 0.6,
+                "scale_factor": 3,
+                "output_format": "png",
+                "num_inference_steps": 18,
+            }
+        }),
+    )
+    .await?;
+
+    let img_data = client.get(&result_url).send().await?.bytes().await?;
+    let img = ImageReader::new(Cursor::new(img_data))
+        .with_guessed_format()?
+        .decode()?;
+
+    Ok((result_url, img))
 }
 
 async fn replicate_request_prediction(
@@ -379,17 +590,9 @@ async fn replicate_request_prediction(
         .ok_or_else(|| anyhow!("No valid status URL found"))?
         .to_string();
 
-    Ok(status_url)
-}
-
-async fn replicate_poll_status(
-    client: &Client,
-    api_token: &str,
-    status_url: &str,
-) -> Result<String> {
     for _ in 0..TIMEOUT {
         let status_response = client
-            .get(status_url)
+            .get(status_url.clone())
             .header("Authorization", format!("Bearer {api_token}"))
             .header("Content-Type", "application/json")
             .send()

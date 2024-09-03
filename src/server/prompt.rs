@@ -5,7 +5,7 @@ use serde_json::json;
 use std::env;
 use time::format_description;
 
-pub async fn generate() -> Result<String> {
+pub async fn generate(message: &str) -> Result<String> {
     let database_history = match sled::open(DATABASE_PATH)
         .and_then(|db| Ok((db.clone(), db.open_tree(IMAGES_TREE)?)))
         .and_then(|(db, images_tree)| Ok((images_tree, db.open_tree(COMMENTS_TREE)?)))
@@ -53,7 +53,7 @@ pub async fn generate() -> Result<String> {
         let datetime_text = date.format(&format).unwrap();
         history_string.push_str(&match data {
             DatabaseObjectType::Wallpaper(wallpaper) => {
-                let liked_state = match wallpaper.vote_state {
+                let liked_state = match wallpaper.liked_state {
                     LikedState::Liked => " (user liked this)",
                     LikedState::Disliked => " (user disliked this)",
                     LikedState::None => "",
@@ -66,6 +66,10 @@ pub async fn generate() -> Result<String> {
                 format!("{datetime_text}: User commented: '{comment}'")
             }
         });
+        history_string.push('\n');
+    }
+    if !message.is_empty() {
+        history_string.push_str(&format!("For this image the user requested: '{message}'"));
         history_string.push('\n');
     }
 

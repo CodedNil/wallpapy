@@ -1,7 +1,7 @@
 use crate::{
     client::networking::{
-        add_comment, generate_wallpaper, get_gallery, like_image, login, remove_comment,
-        remove_image,
+        add_comment, generate_wallpaper, get_gallery, like_image, login, recreate_image,
+        remove_comment, remove_image,
     },
     common::{CommentData, DatabaseObjectType, GetWallpapersResponse, LikedState, WallpaperData},
     PORT,
@@ -123,17 +123,20 @@ impl Wallpapy {
                     let toasts_store = self.toasts.clone();
                     let network_store = self.network_data.clone();
                     toasts_store.lock().info("Generating Wallpaper");
-                    generate_wallpaper(&self.host, &self.stored.auth_token, move |result| {
-                        match result {
-                            Ok(()) => {
-                                toasts_store.lock().success("Generated Wallpaper");
-                                network_store.lock().get_gallery = GetGalleryState::Wanted;
-                            }
-                            Err(_) => {
-                                toasts_store.lock().error("Failed to save layout");
-                            }
-                        }
-                    });
+                    generate_wallpaper(
+                        &self.host,
+                        &self.stored.auth_token,
+                        self.comment_submission.trim(),
+                        move |result| {
+                            button_pressed_result(
+                                result,
+                                &network_store,
+                                &toasts_store,
+                                "Generated wallpaper",
+                            );
+                        },
+                    );
+                    self.comment_submission = String::new();
                 }
 
                 // Text input for submitting a comment
@@ -145,14 +148,8 @@ impl Wallpapy {
                         &self.host,
                         &self.stored.auth_token,
                         self.comment_submission.trim(),
-                        move |result| match result {
-                            Ok(()) => {
-                                toasts_store.lock().success("Comment submitted");
-                                network_store.lock().get_gallery = GetGalleryState::Wanted;
-                            }
-                            Err(_) => {
-                                toasts_store.lock().error("Failed to add comment");
-                            }
+                        move |result| {
+                            button_pressed_result(result, &network_store, &toasts_store, "");
                         },
                     );
                     self.comment_submission = String::new();
@@ -297,14 +294,8 @@ impl Wallpapy {
                     &self.host,
                     &self.stored.auth_token,
                     &wallpaper.id,
-                    move |result| match result {
-                        Ok(()) => {
-                            toasts_store.lock().success("Deleted wallpaper");
-                            network_store.lock().get_gallery = GetGalleryState::Wanted;
-                        }
-                        Err(_) => {
-                            toasts_store.lock().error("Failed to delete wallpaper");
-                        }
+                    move |result| {
+                        button_pressed_result(result, &network_store, &toasts_store, "");
                     },
                 );
             }
@@ -319,7 +310,7 @@ impl Wallpapy {
         painter.add(Shape::rect_filled(
             thumbs_down_button_rect,
             ui_scale,
-            if wallpaper.vote_state == LikedState::Disliked {
+            if wallpaper.liked_state == LikedState::Disliked {
                 Color32::DARK_RED
             } else {
                 Color32::BLACK
@@ -343,14 +334,7 @@ impl Wallpapy {
                     &self.stored.auth_token,
                     &wallpaper.id,
                     LikedState::Disliked,
-                    move |result| match result {
-                        Ok(()) => {
-                            network_store.lock().get_gallery = GetGalleryState::Wanted;
-                        }
-                        Err(_) => {
-                            toasts_store.lock().error("Failed to dislike wallpaper");
-                        }
-                    },
+                    move |result| button_pressed_result(result, &network_store, &toasts_store, ""),
                 );
             }
         }
@@ -364,7 +348,7 @@ impl Wallpapy {
         painter.add(Shape::rect_filled(
             thumbs_up_button_rect,
             ui_scale,
-            if wallpaper.vote_state == LikedState::Liked {
+            if wallpaper.liked_state == LikedState::Liked {
                 Color32::from_rgb(160, 100, 0)
             } else {
                 Color32::BLACK
@@ -388,14 +372,39 @@ impl Wallpapy {
                     &self.stored.auth_token,
                     &wallpaper.id,
                     LikedState::Liked,
-                    move |result| match result {
-                        Ok(()) => {
-                            network_store.lock().get_gallery = GetGalleryState::Wanted;
-                        }
-                        Err(_) => {
-                            toasts_store.lock().error("Failed to like wallpaper");
-                        }
-                    },
+                    move |result| button_pressed_result(result, &network_store, &toasts_store, ""),
+                );
+            }
+        }
+
+        // Add recreate button left of thumbs up
+        let recreate_button_rect = egui::Align2::RIGHT_TOP.anchor_size(
+            thumbs_up_button_rect.left_top() + vec2(-10.0, 0.0),
+            delete_button_size,
+        );
+        let is_hovering = ui.rect_contains_pointer(recreate_button_rect);
+        painter.add(Shape::rect_filled(
+            recreate_button_rect,
+            ui_scale,
+            Color32::BLACK.gamma_multiply(if is_hovering { 1.0 } else { 0.8 }),
+        ));
+        painter.text(
+            recreate_button_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            egui_phosphor::regular::REPEAT,
+            FontId::proportional(ui_scale),
+            Color32::WHITE,
+        );
+        if is_hovering {
+            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+            if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
+                let toasts_store = self.toasts.clone();
+                let network_store = self.network_data.clone();
+                recreate_image(
+                    &self.host,
+                    &self.stored.auth_token,
+                    &wallpaper.id,
+                    move |result| button_pressed_result(result, &network_store, &toasts_store, ""),
                 );
             }
         }
@@ -414,7 +423,7 @@ impl Wallpapy {
         painter.add(Shape::rect_filled(
             prompt_rect.expand(ui_scale * 0.5625),
             ui_scale,
-            match wallpaper.vote_state {
+            match wallpaper.liked_state {
                 LikedState::Liked => Color32::from_rgb(160, 100, 0),
                 LikedState::Disliked => Color32::DARK_RED,
                 LikedState::None => Color32::BLACK,
@@ -479,15 +488,7 @@ impl Wallpapy {
                     &self.host,
                     &self.stored.auth_token,
                     &comment.id,
-                    move |result| match result {
-                        Ok(()) => {
-                            toasts_store.lock().success("Deleted comment");
-                            network_store.lock().get_gallery = GetGalleryState::Wanted;
-                        }
-                        Err(_) => {
-                            toasts_store.lock().error("Failed to delete comment");
-                        }
-                    },
+                    move |result| button_pressed_result(result, &network_store, &toasts_store, ""),
                 );
             }
         }
@@ -615,6 +616,27 @@ impl Wallpapy {
                 }
                 network_data_guard.login = LoginState::None;
             }
+        }
+    }
+}
+
+fn button_pressed_result(
+    result: Result<()>,
+    network_store: &Arc<Mutex<DownloadData>>,
+    toasts_store: &Arc<Mutex<Toasts>>,
+    success_str: &str,
+) {
+    match result {
+        Ok(()) => {
+            if !success_str.is_empty() {
+                toasts_store.lock().success(success_str);
+            }
+            network_store.lock().get_gallery = GetGalleryState::Wanted;
+        }
+        Err(e) => {
+            toasts_store
+                .lock()
+                .error(format!("Failed to submit request: {e}"));
         }
     }
 }

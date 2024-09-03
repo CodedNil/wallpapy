@@ -49,7 +49,7 @@ pub struct WallpaperData {
     pub upscaled_file: Option<ImageFile>,
     pub upscale_state: UpscaleState,
     pub thumbhash: Vec<u8>,
-    pub vote_state: LikedState,
+    pub liked_state: LikedState,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -73,20 +73,20 @@ pub struct GetWallpapersResponse {
     pub comments: Vec<CommentData>,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum LikedState {
     None,
     Liked,
     Disliked,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum WallpaperImageType {
     Desktop16x9,
     Mobile,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum UpscaleState {
     None,
     Basic,
