@@ -9,7 +9,7 @@ use crate::{
 use anyhow::Result;
 use egui::{
     vec2, Align2, CentralPanel, Color32, Context, CursorIcon, FontId, Frame, Image, PointerButton,
-    ScrollArea, Sense, Shape, TextEdit, Vec2, Widget, Window,
+    Rect, ScrollArea, Sense, Shape, TextEdit, Vec2, Widget, Window,
 };
 use egui_notify::Toasts;
 use egui_pull_to_refresh::PullToRefresh;
@@ -63,6 +63,9 @@ impl Wallpapy {
         let stored = cc.storage.map_or_else(StoredData::default, |storage| {
             eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default()
         });
+
+        egui_extras::install_image_loaders(&cc.egui_ctx);
+        egui_thumbhash::register(&cc.egui_ctx);
 
         Self {
             host: format!("localhost:{PORT}"),
@@ -161,7 +164,6 @@ impl Wallpapy {
             });
         });
 
-        egui_extras::install_image_loaders(ctx);
         egui::CentralPanel::default().show(ctx, |ui| {
             if let Some(wallpaper) = &self.fullscreen_image {
                 let file = wallpaper
@@ -253,17 +255,23 @@ impl Wallpapy {
             || wallpaper.original_file.file_name.clone(),
             |upscaled_file| upscaled_file.file_name.clone(),
         );
-        let image_rect = ui
-            .add_sized(
-                Vec2::new(width, height),
-                ThumbhashImage::new(
-                    egui::Image::new(&format!("http://{}/wallpapers/{}", self.host, file_name)),
-                    &wallpaper.thumbhash,
-                )
-                .id(format!("gallery_item_{}", wallpaper.id).into())
-                .rounding(16.0),
+
+        // Only render images if they are visible (this is basically lazy loading)
+        let image_size = Vec2::new(width, height);
+        let image_rect = if ui
+            .is_rect_visible(Rect::from_min_size(ui.next_widget_position(), image_size))
+        {
+            let image = egui::Image::new(format!("http://{}/wallpapers/{}", self.host, file_name))
+                .show_loading_spinner(false);
+            ui.add_sized(
+                image_size,
+                ThumbhashImage::new(image, &wallpaper.thumbhash).rounding(16.0),
             )
-            .rect;
+            .rect
+        } else {
+            let (rect, _) = ui.allocate_exact_size(image_size, Sense::hover());
+            rect
+        };
 
         // Start painting
         let ui_scale = 12.0;
