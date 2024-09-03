@@ -21,7 +21,7 @@ use time::{
 use tokio::fs;
 use uuid::Uuid;
 
-const TIMEOUT: u64 = 180;
+const TIMEOUT: u64 = 360;
 
 pub async fn generate(packet: Bytes) -> impl IntoResponse {
     let packet: TokenStringPacket = match bincode::deserialize(&packet) {

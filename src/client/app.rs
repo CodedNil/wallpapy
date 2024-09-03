@@ -8,8 +8,8 @@ use crate::{
 };
 use anyhow::Result;
 use egui::{
-    vec2, Align2, CentralPanel, Color32, Context, CursorIcon, FontId, Frame, PointerButton,
-    ScrollArea, Sense, Shape, TextEdit, Vec2, Window,
+    vec2, Align2, CentralPanel, Color32, Context, CursorIcon, FontId, Frame, Image, PointerButton,
+    ScrollArea, Sense, Shape, TextEdit, Vec2, Widget, Window,
 };
 use egui_notify::Toasts;
 use egui_pull_to_refresh::PullToRefresh;
@@ -25,6 +25,7 @@ nestify::nest! {
 
         gallery: Option<Vec<WallpaperData>>,
         comments: Option<Vec<CommentData>>,
+        fullscreen_image: Option<WallpaperData>,
 
         #>[derive(Deserialize, Serialize, Default)]
         #>[serde(default)]
@@ -68,6 +69,7 @@ impl Wallpapy {
             toasts: Arc::new(Mutex::new(Toasts::default())),
             gallery: None,
             comments: None,
+            fullscreen_image: None,
             stored,
             login_form: LoginForm {
                 username: String::new(),
@@ -117,8 +119,6 @@ impl Wallpapy {
     fn show_main_panel(&mut self, ctx: &Context) {
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label("Welcome to Wallpapy!");
-
                 if ui.button("Generate Wallpaper").clicked() {
                     let toasts_store = self.toasts.clone();
                     let network_store = self.network_data.clone();
@@ -163,67 +163,87 @@ impl Wallpapy {
 
         egui_extras::install_image_loaders(ctx);
         egui::CentralPanel::default().show(ctx, |ui| {
-            let wallpapers = self.gallery.clone().unwrap_or_default();
-            let comments = self.comments.clone().unwrap_or_default();
+            if let Some(wallpaper) = &self.fullscreen_image {
+                let file = wallpaper
+                    .upscaled_file
+                    .as_ref()
+                    .map_or(&wallpaper.original_file, |upscaled_file| upscaled_file);
+                ui.vertical(|ui| {
+                    Image::new(format!(
+                        "http://{}/wallpapers/{}",
+                        self.host, file.file_name
+                    ))
+                    .maintain_aspect_ratio(true)
+                    .ui(ui);
+                    ui.label(wallpaper.prompt.to_string());
+                });
+                // If escape pressed, close the fullscreen image
+                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    self.fullscreen_image = None;
+                }
+            } else {
+                let wallpapers = self.gallery.clone().unwrap_or_default();
+                let comments = self.comments.clone().unwrap_or_default();
 
-            // Collect the wallpapers and comments into a single list, sorted by datetime
-            let mut combined_list = wallpapers
-                .iter()
-                .map(|wallpaper| {
-                    (
-                        wallpaper.datetime,
-                        DatabaseObjectType::Wallpaper(wallpaper.clone()),
-                    )
-                })
-                .chain(comments.iter().map(|comment| {
-                    (
-                        comment.datetime,
-                        DatabaseObjectType::Comment(comment.clone()),
-                    )
-                }))
-                .collect::<Vec<_>>();
-            combined_list.sort_by_key(|(datetime, _)| *datetime);
-            let combined_list = combined_list;
+                // Collect the wallpapers and comments into a single list, sorted by datetime
+                let mut combined_list = wallpapers
+                    .iter()
+                    .map(|wallpaper| {
+                        (
+                            wallpaper.datetime,
+                            DatabaseObjectType::Wallpaper(wallpaper.clone()),
+                        )
+                    })
+                    .chain(comments.iter().map(|comment| {
+                        (
+                            comment.datetime,
+                            DatabaseObjectType::Comment(comment.clone()),
+                        )
+                    }))
+                    .collect::<Vec<_>>();
+                combined_list.sort_by_key(|(datetime, _)| *datetime);
+                let combined_list = combined_list;
 
-            let available_width = ui.available_width();
-            let spacing = ui.spacing().item_spacing;
-            let cell_width = 400.0;
-            let columns = (available_width / (cell_width + spacing.x))
-                .floor()
-                .max(1.0) as usize;
-            let cell_width =
-                (columns as f32 - 1.0).mul_add(-spacing.x, available_width / columns as f32);
-            let cell_height = cell_width * 0.5625;
+                let available_width = ui.available_width();
+                let spacing = ui.spacing().item_spacing;
+                let cell_width = 400.0;
+                let columns = (available_width / (cell_width + spacing.x))
+                    .floor()
+                    .max(1.0) as usize;
+                let cell_width =
+                    (columns as f32 - 1.0).mul_add(-spacing.x, available_width / columns as f32);
+                let cell_height = cell_width * 0.5625;
 
-            let refresh_response = PullToRefresh::new(false).scroll_area_ui(ui, |ui| {
-                ScrollArea::vertical().show(ui, |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        for (_, data) in combined_list.iter().rev() {
-                            match data {
-                                DatabaseObjectType::Wallpaper(image) => {
-                                    self.draw_wallpaper_box(ui, image, cell_width, cell_height);
-                                }
-                                DatabaseObjectType::Comment(comment) => {
-                                    self.draw_comment_box(
-                                        ui,
-                                        comment,
-                                        cell_width * 0.5,
-                                        cell_height,
-                                    );
+                let refresh_response = PullToRefresh::new(false).scroll_area_ui(ui, |ui| {
+                    ScrollArea::vertical().show(ui, |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            for (_, data) in combined_list.iter().rev() {
+                                match data {
+                                    DatabaseObjectType::Wallpaper(image) => {
+                                        self.draw_wallpaper_box(ui, image, cell_width, cell_height);
+                                    }
+                                    DatabaseObjectType::Comment(comment) => {
+                                        self.draw_comment_box(
+                                            ui,
+                                            comment,
+                                            cell_width * 0.5,
+                                            cell_height,
+                                        );
+                                    }
                                 }
                             }
-                        }
+                        })
                     })
-                })
-            });
-            if refresh_response.should_refresh() {
-                self.network_data.lock().get_gallery = GetGalleryState::Wanted;
+                });
+                if refresh_response.should_refresh() {
+                    self.network_data.lock().get_gallery = GetGalleryState::Wanted;
+                }
             }
         });
     }
 
     fn draw_wallpaper_box(
-        &self,
+        &mut self,
         ui: &mut egui::Ui,
         wallpaper: &WallpaperData,
         width: f32,
@@ -248,6 +268,7 @@ impl Wallpapy {
         // Start painting
         let ui_scale = 12.0;
         let painter = ui.painter();
+        let mut sub_button_hovered = false;
 
         // Draw date in top-left corner
         let datetime_galley = painter.layout_no_wrap(
@@ -286,6 +307,7 @@ impl Wallpapy {
             Color32::WHITE,
         );
         if is_hovering {
+            sub_button_hovered = true;
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
             if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
                 let toasts_store = self.toasts.clone();
@@ -325,6 +347,7 @@ impl Wallpapy {
             Color32::WHITE,
         );
         if is_hovering {
+            sub_button_hovered = true;
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
             if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
                 let toasts_store = self.toasts.clone();
@@ -363,6 +386,7 @@ impl Wallpapy {
             Color32::WHITE,
         );
         if is_hovering {
+            sub_button_hovered = true;
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
             if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
                 let toasts_store = self.toasts.clone();
@@ -396,6 +420,7 @@ impl Wallpapy {
             Color32::WHITE,
         );
         if is_hovering {
+            sub_button_hovered = true;
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
             if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
                 let toasts_store = self.toasts.clone();
@@ -409,28 +434,37 @@ impl Wallpapy {
             }
         }
 
-        // Draw prompt in bottom center
-        let prompt_galley = painter.layout(
-            wallpaper.prompt.clone(),
-            FontId::proportional(ui_scale),
-            Color32::WHITE.gamma_multiply(0.8),
-            width - 40.0,
-        );
-        let prompt_rect = egui::Align2::CENTER_BOTTOM.anchor_size(
-            image_rect.center_bottom() + vec2(0.0, -20.0),
-            prompt_galley.size(),
-        );
-        painter.add(Shape::rect_filled(
-            prompt_rect.expand(ui_scale * 0.5625),
-            ui_scale,
-            match wallpaper.liked_state {
-                LikedState::Liked => Color32::from_rgb(160, 100, 0),
-                LikedState::Disliked => Color32::DARK_RED,
-                LikedState::None => Color32::BLACK,
-            }
-            .gamma_multiply(0.8),
-        ));
-        painter.galley(prompt_rect.min, prompt_galley, Color32::WHITE);
+        // // Draw prompt in bottom center
+        // let prompt_galley = painter.layout(
+        //     wallpaper.prompt.clone(),
+        //     FontId::proportional(ui_scale),
+        //     Color32::WHITE.gamma_multiply(0.8),
+        //     width - 40.0,
+        // );
+        // let prompt_rect = egui::Align2::CENTER_BOTTOM.anchor_size(
+        //     image_rect.center_bottom() + vec2(0.0, -20.0),
+        //     prompt_galley.size(),
+        // );
+        // painter.add(Shape::rect_filled(
+        //     prompt_rect.expand(ui_scale * 0.5625),
+        //     ui_scale,
+        //     match wallpaper.liked_state {
+        //         LikedState::Liked => Color32::from_rgb(160, 100, 0),
+        //         LikedState::Disliked => Color32::DARK_RED,
+        //         LikedState::None => Color32::BLACK,
+        //     }
+        //     .gamma_multiply(0.8),
+        // ));
+        // painter.galley(prompt_rect.min, prompt_galley, Color32::WHITE);
+
+        // Check if image is clicked
+        let is_hovering = ui.rect_contains_pointer(image_rect);
+        if is_hovering
+            && !sub_button_hovered
+            && ui.input(|i| i.pointer.button_clicked(PointerButton::Primary))
+        {
+            self.fullscreen_image = Some(wallpaper.clone());
+        }
     }
 
     fn draw_comment_box(&self, ui: &mut egui::Ui, comment: &CommentData, width: f32, height: f32) {
