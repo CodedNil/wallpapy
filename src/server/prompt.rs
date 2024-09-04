@@ -221,7 +221,7 @@ pub async fn generate(message: Option<String>) -> Result<(String, String)> {
             },
             {
                 "role": "system",
-                "content": "You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines, follow the prompt guidelines for best results, always specify no watermark/signature, and prioritise users comments as feedback"
+                "content": "You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines, follow the prompt guidelines for best results, prioritise users comments as feedback"
             },
             {
                 "role": "system",

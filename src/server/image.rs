@@ -460,6 +460,10 @@ async fn remove_wallpaper_impl(packet: TokenUuidPacket) -> Result<()> {
         if file_path.exists() {
             fs::remove_file(file_path).await?;
         }
+        let file_path = dir.join(&wallpaper_data.thumbnail_file.file_name);
+        if file_path.exists() {
+            fs::remove_file(file_path).await?;
+        }
         if let Some(upscaled_file) = wallpaper_data.upscaled_file {
             let upscaled_file = dir.join(&upscaled_file.file_name);
             if upscaled_file.exists() {
@@ -490,7 +494,7 @@ async fn image_diffusion(
             "input": {
                 "prompt": prompt,
                 "num_outputs": 1,
-                "aspect_ratio": "16:9",
+                "aspect_ratio": "3:2",
                 "output_format": "png",
                 "output_quality": 100
             }
@@ -528,8 +532,8 @@ async fn upscale_image(
             "version": "dfad41707589d68ecdccd1dfa600d55a208f9310748e44bfe35b4a6291453d5e",
             "input": {
                 "image": image_uri,
-                "prompt": format!("masterpiece, best quality, highres, <lora:more_details:0.5> <lora:SDXLrender_v2.0:1>, {}", prompt),
-                "negative_prompt": "(worst quality, low quality, normal quality:2) JuggernautNegative-neg, ((signature))",
+                "prompt": format!("masterpiece, best quality, highres, <lora:more_details:0.1> <lora:SDXLrender_v2.0:1>, {}", prompt),
+                "negative_prompt": "(worst quality, low quality, normal quality:2) JuggernautNegative-neg, (signature:3, signed, watermark, inscription, writing, text)",
                 "dynamic": 6,
                 "handfix": "disabled",
                 "sharpen": 0,
