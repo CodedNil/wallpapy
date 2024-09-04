@@ -8,8 +8,8 @@ use crate::{
 };
 use anyhow::Result;
 use egui::{
-    vec2, Align2, CentralPanel, Color32, Context, CursorIcon, FontId, Frame, Image, PointerButton,
-    Rect, RichText, ScrollArea, Sense, Shape, TextEdit, Vec2, Widget, Window,
+    vec2, Align2, CentralPanel, Color32, Context, CursorIcon, FontId, Frame, Image, Key,
+    PointerButton, Rect, RichText, ScrollArea, Sense, Shape, TextEdit, Vec2, Widget, Window,
 };
 use egui_notify::Toasts;
 use egui_pull_to_refresh::PullToRefresh;
@@ -23,7 +23,7 @@ nestify::nest! {
         host: String,
         toasts: Arc<Mutex<Toasts>>,
 
-        gallery: Option<Vec<WallpaperData>>,
+        wallpapers: Option<Vec<WallpaperData>>,
         comments: Option<Vec<CommentData>>,
         fullscreen_image: Option<WallpaperData>,
 
@@ -70,7 +70,7 @@ impl Wallpapy {
         Self {
             host: format!("localhost:{PORT}"),
             toasts: Arc::new(Mutex::new(Toasts::default())),
-            gallery: None,
+            wallpapers: None,
             comments: None,
             fullscreen_image: None,
             stored,
@@ -165,6 +165,12 @@ impl Wallpapy {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
+            let mut new_fullscreen = None;
+            // If escape pressed, close the fullscreen image
+            if ui.input(|i| i.key_pressed(Key::Escape)) {
+                self.fullscreen_image = None;
+            }
+            // Display the fullscreen image if it exists
             if let Some(wallpaper) = &self.fullscreen_image {
                 let file = wallpaper
                     .upscaled_file
@@ -182,14 +188,37 @@ impl Wallpapy {
                         RichText::new(wallpaper.prompt.clone()).font(FontId::proportional(20.0)),
                     )
                 });
-                // If escape pressed, close the fullscreen image
-                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                    self.fullscreen_image = None;
-                }
-            } else {
-                let wallpapers = self.gallery.clone().unwrap_or_default();
-                let comments = self.comments.clone().unwrap_or_default();
 
+                // Handle left and right arrow key press
+                let left_pressed =
+                    ui.input(|i| i.key_pressed(Key::ArrowLeft) || i.key_pressed(Key::A));
+                let right_pressed =
+                    ui.input(|i| i.key_pressed(Key::ArrowRight) || i.key_pressed(Key::D));
+                if (left_pressed || right_pressed) && self.wallpapers.is_some() {
+                    let mut target_datetime = None;
+                    let mut target_wallpaper = None;
+
+                    let comparison = if left_pressed {
+                        |dt1, dt2| dt1 > dt2
+                    } else {
+                        |dt1, dt2| dt1 < dt2
+                    };
+
+                    for paper in self.wallpapers.as_ref().unwrap() {
+                        if comparison(paper.datetime, wallpaper.datetime)
+                            && (target_datetime.is_none()
+                                || comparison(target_datetime.unwrap(), paper.datetime))
+                        {
+                            target_datetime = Some(paper.datetime);
+                            target_wallpaper = Some(paper.clone());
+                        }
+                    }
+
+                    if let Some(target_wallpaper) = target_wallpaper {
+                        new_fullscreen = Some(target_wallpaper);
+                    }
+                }
+            } else if let (Some(wallpapers), Some(comments)) = (&self.wallpapers, &self.comments) {
                 // Collect the wallpapers and comments into a single list, sorted by datetime
                 let mut combined_list = wallpapers
                     .iter()
@@ -245,6 +274,9 @@ impl Wallpapy {
                     ui.ctx().forget_all_images();
                     ui.ctx().clear_animations();
                 }
+            }
+            if new_fullscreen.is_some() {
+                self.fullscreen_image = new_fullscreen;
             }
         });
     }
@@ -593,7 +625,7 @@ impl Wallpapy {
             GetGalleryState::Done(ref response) => {
                 match response {
                     Ok(wallpapers) => {
-                        self.gallery = Some(wallpapers.images.clone());
+                        self.wallpapers = Some(wallpapers.images.clone());
                         self.comments = Some(wallpapers.comments.clone());
                     }
                     Err(e) => {

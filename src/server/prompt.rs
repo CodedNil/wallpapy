@@ -192,8 +192,8 @@ pub async fn generate(message: Option<String>) -> Result<(String, String)> {
                     LikedState::Disliked => " (user disliked this)",
                     LikedState::None => "",
                 };
-                let prompt = wallpaper.prompt.replace('\n', "  ");
-                format!("{datetime_text}: Wallpaper{liked_state} created with prompt: '{prompt}'")
+                let prompt = wallpaper.prompt_short;
+                format!("{datetime_text}: Wallpaper{liked_state} created with design: '{prompt}'")
             }
             DatabaseObjectType::Comment(comment) => {
                 let comment = comment.comment;
@@ -241,7 +241,7 @@ pub async fn generate(message: Option<String>) -> Result<(String, String)> {
         "messages": [
             {
                 "role": "user",
-                "content": format!("Take this input '{prompt}' and return a shortened version of it, max 12 words")
+                "content": format!("Take this input '{prompt}' and return a shortened version of it, only including the image description, max 25 words")
             }
         ],
         "max_tokens": 4096
