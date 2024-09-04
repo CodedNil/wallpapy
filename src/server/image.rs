@@ -7,7 +7,8 @@ use anyhow::{anyhow, Result};
 use axum::http::{HeaderMap, HeaderValue};
 use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use image::{imageops, DynamicImage, GenericImageView, ImageReader, Pixel};
+use image::imageops::FilterType;
+use image::{DynamicImage, GenericImageView, ImageReader, Pixel};
 use rand::seq::SliceRandom;
 use reqwest::Client;
 use serde_json::json;
@@ -312,7 +313,7 @@ pub async fn generate_wallpaper_impl(
     };
 
     // Downscale to 480p and save as thumbnail file
-    let thumb_image = image.resize_to_fill(854, 480, imageops::FilterType::Lanczos3);
+    let thumb_image = image.resize_to_fill(854, 480, FilterType::Lanczos3);
     let thumb_file_name = format!("{datetime_str}_thumb.webp");
     thumb_image.save(dir.join(&thumb_file_name))?;
     let thumbnail_file = ImageFile {
@@ -370,7 +371,7 @@ pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper_data: WallpaperData) -> 
     let (upscaled_url, upscaled_image) =
         upscale_image(&client, &api_token, &image, &wallpaper_data.prompt).await?;
     log::info!("Upscaled image: {}", &upscaled_url);
-    let upscaled_image = upscaled_image.resize_to_fill(3820, 2160, imageops::FilterType::Lanczos3);
+    let upscaled_image = upscaled_image.resize_to_fill(3840, 2160, FilterType::Lanczos3);
 
     // Save to file
     let dir = Path::new("wallpapers");
@@ -387,7 +388,7 @@ pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper_data: WallpaperData) -> 
     });
 
     // Downscale to 480p and save as thumbnail file
-    let thumb_image = upscaled_image.resize_to_fill(854, 480, imageops::FilterType::Lanczos3);
+    let thumb_image = upscaled_image.resize_to_fill(854, 480, FilterType::Lanczos3);
     let thumb_file_name = format!("{datetime_str}_thumb.webp");
     thumb_image.save(dir.join(&thumb_file_name))?;
     let thumbnail_file = ImageFile {
@@ -517,6 +518,7 @@ async fn upscale_image(
     image: &DynamicImage,
     prompt: &str,
 ) -> Result<(String, DynamicImage)> {
+    let image = image.resize(960, 640, FilterType::Lanczos3);
     let mut bytes = Vec::new();
     image.write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)?;
     let image_uri = format!(
