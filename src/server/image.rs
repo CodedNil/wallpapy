@@ -305,7 +305,10 @@ pub async fn generate_wallpaper_impl(
 
     // Save the original image
     let file_name = format!("{datetime_str}.webp");
-    image.save(dir.join(&file_name))?;
+    std::fs::write(
+        dir.join(&file_name),
+        &*webp::Encoder::from_image(&image).unwrap().encode(90.0),
+    )?;
     let original_file = ImageFile {
         file_name,
         width: image.width(),
@@ -315,7 +318,12 @@ pub async fn generate_wallpaper_impl(
     // Downscale to 480p and save as thumbnail file
     let thumb_image = image.resize_to_fill(854, 480, FilterType::Lanczos3);
     let thumb_file_name = format!("{datetime_str}_thumb.webp");
-    thumb_image.save(dir.join(&thumb_file_name))?;
+    std::fs::write(
+        dir.join(&thumb_file_name),
+        &*webp::Encoder::from_image(&thumb_image)
+            .unwrap()
+            .encode(90.0),
+    )?;
     let thumbnail_file = ImageFile {
         file_name: thumb_file_name,
         width: thumb_image.width(),
@@ -380,7 +388,12 @@ pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper_data: WallpaperData) -> 
 
     // Save the upscaled image
     let upscaled_file_name = format!("{datetime_str}_upscaled.webp");
-    upscaled_image.save(dir.join(&upscaled_file_name))?;
+    std::fs::write(
+        dir.join(&upscaled_file_name),
+        &*webp::Encoder::from_image(&upscaled_image)
+            .unwrap()
+            .encode(90.0),
+    )?;
     let upscaled_file = Some(ImageFile {
         file_name: upscaled_file_name,
         width: upscaled_image.width(),
@@ -390,7 +403,12 @@ pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper_data: WallpaperData) -> 
     // Downscale to 480p and save as thumbnail file
     let thumb_image = upscaled_image.resize_to_fill(854, 480, FilterType::Lanczos3);
     let thumb_file_name = format!("{datetime_str}_thumb.webp");
-    thumb_image.save(dir.join(&thumb_file_name))?;
+    std::fs::write(
+        dir.join(&thumb_file_name),
+        &*webp::Encoder::from_image(&thumb_image)
+            .unwrap()
+            .encode(90.0),
+    )?;
     let thumbnail_file = ImageFile {
         file_name: thumb_file_name,
         width: thumb_image.width(),
