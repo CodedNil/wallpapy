@@ -31,8 +31,10 @@ pub async fn add_comment(packet: Bytes) -> impl IntoResponse {
                 id,
                 bincode::serialize(&CommentData {
                     id,
+
                     datetime,
                     datetime_text,
+
                     comment: packet.string,
                 })?,
             )?;
