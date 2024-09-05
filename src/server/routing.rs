@@ -1,10 +1,7 @@
-use crate::{
-    common::WallpaperData,
-    server::{
-        auth::login_server,
-        commenting::{add_comment, remove_comment},
-        image, DATABASE_PATH, IMAGES_TREE,
-    },
+use crate::server::{
+    auth::login_server,
+    commenting::{add_comment, remove_comment},
+    image, read_database,
 };
 use axum::{
     routing::{get, post},
@@ -29,16 +26,17 @@ pub fn setup_routes(app: Router) -> Router {
 
 pub async fn start_server() {
     loop {
-        match sled::open(DATABASE_PATH).and_then(|db| db.open_tree(IMAGES_TREE)) {
-            Ok(images_tree) => {
+        match read_database().await {
+            Ok(database) => {
                 let cur_time = OffsetDateTime::now_utc();
-                let latest_time = images_tree
+                let latest_time = database
+                    .wallpapers
                     .iter()
-                    .values()
-                    .filter_map(|v| v.ok().and_then(|bytes| bincode::deserialize(&bytes).ok()))
-                    .max_by_key(|wallpaper: &WallpaperData| wallpaper.datetime)
-                    .map_or(cur_time, |image| image.datetime);
+                    .max_by_key(|(_, wallpaper)| wallpaper.datetime)
+                    .map_or(cur_time, |(_, wallpaper)| wallpaper.datetime);
+
                 log::info!("Time since last wallpaper: {:?}", cur_time - latest_time);
+
                 if cur_time - latest_time > NEW_WALLPAPER_INTERVAL {
                     if let Err(err) = image::generate_wallpaper_impl(None, None).await {
                         log::error!("Error generating wallpaper: {:?}", err);

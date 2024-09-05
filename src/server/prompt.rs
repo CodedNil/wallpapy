@@ -1,8 +1,9 @@
-use crate::common::{CommentData, DatabaseObjectType, LikedState, WallpaperData};
-use crate::server::{COMMENTS_TREE, DATABASE_PATH, IMAGES_TREE};
+use crate::common::{DatabaseObjectType, LikedState};
+use crate::server::{read_database, Database};
 use anyhow::{anyhow, Result};
 use reqwest::Client;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::env;
 use time::format_description;
 
@@ -140,46 +141,36 @@ Common Pitfalls to Avoid
 ";
 
 pub async fn generate(message: Option<String>) -> Result<(String, String)> {
-    let database_history = match sled::open(DATABASE_PATH)
-        .and_then(|db| Ok((db.clone(), db.open_tree(IMAGES_TREE)?)))
-        .and_then(|(db, images_tree)| Ok((images_tree, db.open_tree(COMMENTS_TREE)?)))
-    {
-        Ok((images_tree, comments_tree)) => {
-            let images: Vec<WallpaperData> = images_tree
-                .iter()
-                .values()
-                .filter_map(|v| v.ok().and_then(|bytes| bincode::deserialize(&bytes).ok()))
-                .collect();
-            let comments: Vec<CommentData> = comments_tree
-                .iter()
-                .values()
-                .filter_map(|v| v.ok().and_then(|bytes| bincode::deserialize(&bytes).ok()))
-                .collect();
-
-            // Collect the images and comments into a single list, sorted by datetime
-            let mut combined_list = images
-                .iter()
-                .map(|wallpaper| {
-                    (
-                        wallpaper.datetime,
-                        DatabaseObjectType::Wallpaper(wallpaper.clone()),
-                    )
-                })
-                .chain(comments.iter().map(|comment| {
-                    (
-                        comment.datetime,
-                        DatabaseObjectType::Comment(comment.clone()),
-                    )
-                }))
-                .collect::<Vec<_>>();
-            combined_list.sort_by_key(|(datetime, _)| *datetime);
-            combined_list
-        }
+    // Read the database
+    let database = match read_database().await {
+        Ok(db) => db,
         Err(e) => {
             log::error!("Failed accessing database {:?}", e);
-            Vec::new()
+            Database {
+                wallpapers: HashMap::new(),
+                comments: HashMap::new(),
+            }
         }
     };
+
+    // Collect the images and comments into a single list, sorted by datetime
+    let mut database_history = database
+        .wallpapers
+        .values()
+        .map(|wallpaper| {
+            (
+                wallpaper.datetime,
+                DatabaseObjectType::Wallpaper(wallpaper.clone()),
+            )
+        })
+        .chain(database.comments.values().map(|comment| {
+            (
+                comment.datetime,
+                DatabaseObjectType::Comment(comment.clone()),
+            )
+        }))
+        .collect::<Vec<_>>();
+    database_history.sort_by_key(|(datetime, _)| *datetime);
 
     let mut history_string = String::new();
     for (date, data) in database_history {

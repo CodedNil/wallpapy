@@ -1,6 +1,5 @@
 use crate::common::{CommentData, TokenStringPacket, TokenUuidPacket};
-use crate::server::{auth::verify_token, COMMENTS_TREE, DATABASE_PATH};
-use anyhow::Result;
+use crate::server::{auth::verify_token, read_database, write_database};
 use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
 use time::{format_description, OffsetDateTime};
 use uuid::Uuid;
@@ -13,34 +12,32 @@ pub async fn add_comment(packet: Bytes) -> impl IntoResponse {
             return StatusCode::BAD_REQUEST;
         }
     };
-    if !matches!(verify_token(&packet.token), Ok(true)) {
+    if !matches!(verify_token(&packet.token).await, Ok(true)) {
         log::error!("Unauthorized add_comment request");
         return StatusCode::UNAUTHORIZED;
     }
 
     // Store a new database entry
-    let result = (|| -> Result<()> {
+    let result = async {
+        let mut database = read_database().await?;
         let id = Uuid::new_v4();
         let datetime = OffsetDateTime::now_utc();
         let format = format_description::parse("[day]/[month]/[year] [hour]:[minute]")?;
         let datetime_text = datetime.format(&format)?;
 
-        sled::open(DATABASE_PATH)?
-            .open_tree(COMMENTS_TREE)?
-            .insert(
+        database.comments.insert(
+            id,
+            CommentData {
                 id,
-                bincode::serialize(&CommentData {
-                    id,
+                datetime,
+                datetime_text,
+                comment: packet.string,
+            },
+        );
 
-                    datetime,
-                    datetime_text,
-
-                    comment: packet.string,
-                })?,
-            )?;
-
-        Ok(())
-    })();
+        write_database(&database).await
+    }
+    .await;
 
     match result {
         Ok(()) => StatusCode::OK,
@@ -59,18 +56,18 @@ pub async fn remove_comment(packet: Bytes) -> impl IntoResponse {
             return StatusCode::BAD_REQUEST;
         }
     };
-    if !matches!(verify_token(&packet.token), Ok(true)) {
+    if !matches!(verify_token(&packet.token).await, Ok(true)) {
         log::error!("Unauthorized remove_comment request");
         return StatusCode::UNAUTHORIZED;
     }
 
     // Remove the database entry
-    let result = (|| -> Result<()> {
-        sled::open(DATABASE_PATH)?
-            .open_tree(COMMENTS_TREE)?
-            .remove(packet.uuid)?;
-        Ok(())
-    })();
+    let result = async {
+        let mut database = read_database().await?;
+        database.comments.retain(|id, _| *id != packet.uuid);
+        write_database(&database).await
+    }
+    .await;
 
     match result {
         Ok(()) => StatusCode::OK,

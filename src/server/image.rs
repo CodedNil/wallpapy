@@ -1,8 +1,8 @@
 use crate::common::{
-    CommentData, GetWallpapersResponse, ImageFile, LikedState, TokenStringPacket,
-    TokenUuidLikedPacket, TokenUuidPacket, WallpaperData,
+    GetWallpapersResponse, ImageFile, LikedState, TokenStringPacket, TokenUuidLikedPacket,
+    TokenUuidPacket, WallpaperData,
 };
-use crate::server::{auth::verify_token, prompt, COMMENTS_TREE, DATABASE_PATH, IMAGES_TREE};
+use crate::server::{auth::verify_token, prompt, read_database, write_database};
 use anyhow::{anyhow, Result};
 use axum::http::{HeaderMap, HeaderValue};
 use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
@@ -32,7 +32,7 @@ pub async fn generate(packet: Bytes) -> impl IntoResponse {
             return StatusCode::BAD_REQUEST;
         }
     };
-    if !matches!(verify_token(&packet.token), Ok(true)) {
+    if !matches!(verify_token(&packet.token).await, Ok(true)) {
         log::error!("Unauthorized generate_wallpaper request");
         return StatusCode::UNAUTHORIZED;
     }
@@ -47,107 +47,111 @@ pub async fn generate(packet: Bytes) -> impl IntoResponse {
 }
 
 pub async fn get() -> impl IntoResponse {
-    match sled::open(DATABASE_PATH)
-        .and_then(|db| Ok((db.clone(), db.open_tree(IMAGES_TREE)?)))
-        .and_then(|(db, images_tree)| Ok((images_tree, db.open_tree(COMMENTS_TREE)?)))
-    {
-        Ok((images_tree, comments_tree)) => {
-            let images: Vec<WallpaperData> = images_tree
-                .iter()
-                .values()
-                .filter_map(|v| v.ok().and_then(|bytes| bincode::deserialize(&bytes).ok()))
-                .collect();
-            let comments: Vec<CommentData> = comments_tree
-                .iter()
-                .values()
-                .filter_map(|v| v.ok().and_then(|bytes| bincode::deserialize(&bytes).ok()))
-                .collect();
+    match read_database().await {
+        Ok(database) => {
+            let images = database.wallpapers.values().cloned().collect();
+            let comments = database.comments.values().cloned().collect();
 
             match bincode::serialize(&GetWallpapersResponse { images, comments }) {
-                Ok(data) => return (StatusCode::OK, data).into_response(),
-                Err(e) => log::error!("{:?}", e),
+                Ok(data) => (StatusCode::OK, data).into_response(),
+                Err(e) => {
+                    log::error!("{:?}", e);
+                    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                }
             }
         }
-        Err(e) => log::error!("{:?}", e),
-    };
-
-    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        Err(e) => {
+            log::error!("{:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 
 pub async fn latest() -> impl IntoResponse {
-    match sled::open(DATABASE_PATH).and_then(|db| db.open_tree(IMAGES_TREE)) {
-        Ok(images_tree) => {
-            if let Some(file_name) = images_tree
+    match read_database().await {
+        Ok(database) => {
+            let latest_image = database
+                .wallpapers
                 .iter()
-                .values()
-                .filter_map(|v| v.ok().and_then(|bytes| bincode::deserialize(&bytes).ok()))
-                .max_by_key(|wallpaper: &WallpaperData| wallpaper.datetime)
-                .map(|wallpaper_data| {
-                    wallpaper_data.upscaled_file.as_ref().map_or_else(
-                        || wallpaper_data.original_file.file_name.clone(),
-                        |upscaled_file| upscaled_file.file_name.clone(),
-                    )
-                })
-            {
-                let image_path = Path::new("wallpapers").join(&file_name);
-                if let Ok(data) = std::fs::read(&image_path) {
-                    let mime_type = mime_guess::from_path(&image_path).first_or_octet_stream();
-                    let mut headers = HeaderMap::new();
-                    headers.insert(
-                        "Content-Type",
-                        HeaderValue::from_str(mime_type.as_ref()).unwrap(),
-                    );
+                .max_by_key(|(_, wallpaper)| wallpaper.datetime)
+                .map(|(_, wallpaper)| wallpaper.clone());
 
-                    return (StatusCode::OK, headers, data).into_response();
+            if let Some(wallpaper) = latest_image {
+                let file_name = wallpaper.upscaled_file.as_ref().map_or_else(
+                    || wallpaper.original_file.file_name.clone(),
+                    |upscaled_file| upscaled_file.file_name.clone(),
+                );
+
+                let image_path = Path::new("wallpapers").join(&file_name);
+                match fs::read(&image_path).await {
+                    Ok(data) => {
+                        let mime_type = mime_guess::from_path(&image_path).first_or_octet_stream();
+                        let mut headers = HeaderMap::new();
+                        headers.insert(
+                            "Content-Type",
+                            HeaderValue::from_str(mime_type.as_ref()).unwrap(),
+                        );
+                        (StatusCode::OK, headers, data).into_response()
+                    }
+                    Err(e) => {
+                        log::error!("Failed to read image file: {:?}", e);
+                        StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                    }
                 }
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
             }
         }
-        Err(e) => log::error!("{:?}", e),
-    };
-
-    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        Err(e) => {
+            log::error!("{:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 
 pub async fn favourites() -> impl IntoResponse {
-    match sled::open(DATABASE_PATH).and_then(|db| db.open_tree(IMAGES_TREE)) {
-        Ok(images_tree) => {
-            let liked_images: Vec<_> = images_tree
+    match read_database().await {
+        Ok(database) => {
+            let liked_image: Option<WallpaperData> = database
+                .wallpapers
                 .iter()
-                .values()
-                .filter_map(|v| {
-                    if let Ok(bytes) = v {
-                        if let Ok(wallpaper_data) = bincode::deserialize::<WallpaperData>(&bytes) {
-                            if matches!(wallpaper_data.liked_state, LikedState::Liked) {
-                                return Some(wallpaper_data);
-                            }
-                        }
-                    }
-                    None
-                })
-                .collect();
+                .filter(|(_, wallpaper)| matches!(wallpaper.liked_state, LikedState::Liked))
+                .map(|(_, wallpaper)| wallpaper.clone())
+                .collect::<Vec<_>>()
+                .choose(&mut rand::thread_rng())
+                .cloned();
 
-            if let Some(wallpaper_data) = liked_images.choose(&mut rand::thread_rng()) {
-                let file_name = wallpaper_data.upscaled_file.as_ref().map_or_else(
-                    || wallpaper_data.original_file.file_name.clone(),
+            if let Some(wallpaper) = liked_image {
+                let file_name = wallpaper.upscaled_file.as_ref().map_or_else(
+                    || wallpaper.original_file.file_name.clone(),
                     |upscaled_file| upscaled_file.file_name.clone(),
                 );
-                let image_path = Path::new("wallpapers").join(&file_name);
-                if let Ok(data) = std::fs::read(&image_path) {
-                    let mime_type = mime_guess::from_path(&image_path).first_or_octet_stream();
-                    let mut headers = HeaderMap::new();
-                    headers.insert(
-                        "Content-Type",
-                        HeaderValue::from_str(mime_type.as_ref()).unwrap(),
-                    );
 
-                    return (StatusCode::OK, headers, data).into_response();
+                let image_path = Path::new("wallpapers").join(&file_name);
+                match fs::read(&image_path).await {
+                    Ok(data) => {
+                        let mime_type = mime_guess::from_path(&image_path).first_or_octet_stream();
+                        let mut headers = HeaderMap::new();
+                        headers.insert(
+                            "Content-Type",
+                            HeaderValue::from_str(mime_type.as_ref()).unwrap(),
+                        );
+                        (StatusCode::OK, headers, data).into_response()
+                    }
+                    Err(e) => {
+                        log::error!("Failed to read image file: {:?}", e);
+                        StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                    }
                 }
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
             }
         }
-        Err(e) => log::error!("{:?}", e),
-    };
-
-    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        Err(e) => {
+            log::error!("{:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 
 pub async fn remove(packet: Bytes) -> impl IntoResponse {
@@ -158,7 +162,7 @@ pub async fn remove(packet: Bytes) -> impl IntoResponse {
             return StatusCode::BAD_REQUEST;
         }
     };
-    if !matches!(verify_token(&packet.token), Ok(true)) {
+    if !matches!(verify_token(&packet.token).await, Ok(true)) {
         log::error!("Unauthorized remove_comment request");
         return StatusCode::UNAUTHORIZED;
     }
@@ -180,36 +184,43 @@ pub async fn like(packet: Bytes) -> impl IntoResponse {
             return StatusCode::BAD_REQUEST.into_response();
         }
     };
-    if !matches!(verify_token(&packet.token), Ok(true)) {
+    if !matches!(verify_token(&packet.token).await, Ok(true)) {
         log::error!("Unauthorized like_image request");
         return StatusCode::UNAUTHORIZED.into_response();
     }
 
     // Set the vote state
-    let result = (|| -> Result<WallpaperData> {
-        let tree = sled::open(DATABASE_PATH)?.open_tree(IMAGES_TREE)?;
+    let result: Result<WallpaperData> = async {
+        let mut database = read_database().await?;
 
-        let mut wallpaper_data: WallpaperData = bincode::deserialize(
-            &tree
-                .get(packet.uuid)?
-                .ok_or_else(|| anyhow::anyhow!("Image not found"))?,
-        )?;
-        if wallpaper_data.liked_state == packet.liked {
-            wallpaper_data.liked_state = LikedState::None;
+        // Perform mutable operations on wallpaper here
+        if let Some((_, wallpaper)) = database
+            .wallpapers
+            .iter_mut()
+            .find(|(id, _)| **id == packet.uuid)
+        {
+            if wallpaper.liked_state == packet.liked {
+                wallpaper.liked_state = LikedState::None;
+            } else {
+                wallpaper.liked_state = packet.liked;
+            }
+            let cloned = wallpaper.clone();
+
+            write_database(&database).await?;
+
+            Ok(cloned)
         } else {
-            wallpaper_data.liked_state = packet.liked;
+            Err(anyhow::anyhow!("Image not found"))
         }
-        tree.insert(packet.uuid, bincode::serialize(&wallpaper_data)?)?;
-
-        Ok(wallpaper_data)
-    })();
+    }
+    .await;
 
     match result {
-        Ok(wallpaper_data) => {
+        Ok(wallpaper) => {
             // Rerun the upscaling if the image was liked, with quality upscaler
-            if wallpaper_data.liked_state == LikedState::Liked {
+            if wallpaper.liked_state == LikedState::Liked {
                 tokio::spawn(async move {
-                    let _ = upscale_wallpaper_impl(packet.uuid, wallpaper_data).await;
+                    let _ = upscale_wallpaper_impl(packet.uuid, wallpaper).await;
                 });
             }
 
@@ -230,22 +241,23 @@ pub async fn recreate(packet: Bytes) -> impl IntoResponse {
             return StatusCode::BAD_REQUEST.into_response();
         }
     };
-    if !matches!(verify_token(&packet.token), Ok(true)) {
+    if !matches!(verify_token(&packet.token).await, Ok(true)) {
         log::error!("Unauthorized like_image request");
         return StatusCode::UNAUTHORIZED.into_response();
     }
 
-    // Set the vote state
-    let result = (|| -> Result<(String, String)> {
-        let tree = sled::open(DATABASE_PATH)?.open_tree(IMAGES_TREE)?;
+    // Get the prompt
+    let result: Result<(String, String)> = async {
+        let database = read_database().await?;
+        let (_, wallpaper) = database
+            .wallpapers
+            .iter()
+            .find(|(id, _)| **id == packet.uuid)
+            .ok_or_else(|| anyhow::anyhow!("Image not found"))?;
 
-        let wallpaper_data: WallpaperData = bincode::deserialize(
-            &tree
-                .get(packet.uuid)?
-                .ok_or_else(|| anyhow::anyhow!("Image not found"))?,
-        )?;
-        Ok((wallpaper_data.prompt, wallpaper_data.prompt_short))
-    })();
+        Ok((wallpaper.prompt.clone(), wallpaper.prompt_short.clone()))
+    }
+    .await;
 
     match result {
         Ok((prompt, prompt_short)) => {
@@ -333,7 +345,7 @@ pub async fn generate_wallpaper_impl(
     // Calculate average color and brightness
     let (average_color, brightness) = calculate_average_color_and_brightness(&thumb_image);
 
-    let wallpaper_data = WallpaperData {
+    let wallpaper = WallpaperData {
         id,
 
         datetime,
@@ -353,17 +365,14 @@ pub async fn generate_wallpaper_impl(
     };
 
     // Store a new database entry
-    sled::open(DATABASE_PATH)
-        .map_err(|e| anyhow!("Failed to open database: {:?}", e))?
-        .open_tree(IMAGES_TREE)
-        .map_err(|e| anyhow!("Failed to open tree: {:?}", e))?
-        .insert(id, bincode::serialize(&wallpaper_data)?)
-        .map_err(|e| anyhow!("Failed to insert into tree: {:?}", e))?;
+    let mut database = read_database().await?;
+    database.wallpapers.insert(id, wallpaper);
+    write_database(&database).await?;
 
     Ok(())
 }
 
-pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper_data: WallpaperData) -> Result<()> {
+pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper: WallpaperData) -> Result<()> {
     log::info!("Upscaling wallpaper {id}");
 
     // Prepare client
@@ -372,19 +381,19 @@ pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper_data: WallpaperData) -> 
         env::var("REPLICATE_API_TOKEN").expect("REPLICATE_API_TOKEN environment variable not set");
 
     // Open image file
-    let image_path = Path::new("wallpapers").join(wallpaper_data.original_file.file_name.clone());
+    let image_path = Path::new("wallpapers").join(wallpaper.original_file.file_name.clone());
     let image = image::open(&image_path)?;
 
     // Upscale the image using the high quality upscaler
     let (upscaled_url, upscaled_image) =
-        upscale_image(&client, &api_token, &image, &wallpaper_data.prompt).await?;
+        upscale_image(&client, &api_token, &image, &wallpaper.prompt).await?;
     log::info!("Upscaled image: {}", &upscaled_url);
     let upscaled_image = upscaled_image.resize_to_fill(3840, 2160, FilterType::Lanczos3);
 
     // Save to file
     let dir = Path::new("wallpapers");
     fs::create_dir_all(dir).await?;
-    let datetime_str = wallpaper_data.datetime.format(&Rfc3339)?;
+    let datetime_str = wallpaper.datetime.format(&Rfc3339)?;
 
     // Save the upscaled image
     let upscaled_file_name = format!("{datetime_str}_upscaled.webp");
@@ -418,21 +427,18 @@ pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper_data: WallpaperData) -> 
     // Calculate average color and brightness
     let (average_color, brightness) = calculate_average_color_and_brightness(&thumb_image);
 
-    let wallpaper_data = WallpaperData {
+    let wallpaper = WallpaperData {
         upscaled_file,
         average_color,
         brightness,
         thumbnail_file,
-        ..wallpaper_data
+        ..wallpaper
     };
 
     // Update the database entry
-    sled::open(DATABASE_PATH)
-        .map_err(|e| anyhow!("Failed to open database: {:?}", e))?
-        .open_tree(IMAGES_TREE)
-        .map_err(|e| anyhow!("Failed to open tree: {:?}", e))?
-        .insert(id, bincode::serialize(&wallpaper_data)?)
-        .map_err(|e| anyhow!("Failed to insert into tree: {:?}", e))?;
+    let mut database = read_database().await?;
+    database.wallpapers.insert(id, wallpaper);
+    write_database(&database).await?;
 
     Ok(())
 }
@@ -465,36 +471,35 @@ fn calculate_average_color_and_brightness(img: &DynamicImage) -> ((u8, u8, u8), 
 }
 
 async fn remove_wallpaper_impl(packet: TokenUuidPacket) -> Result<()> {
-    // Open the database and find the entry
-    let db = sled::open(DATABASE_PATH)?;
-    let tree = db.open_tree(IMAGES_TREE)?;
+    let mut database = read_database().await?;
 
-    // Retrieve the existing entry
-    if let Some(data) = tree.get(packet.uuid)? {
-        let wallpaper_data: WallpaperData = bincode::deserialize(&data)?;
-
-        // Construct the file path and remove the file
-        let dir = Path::new("wallpapers");
-        let file_path = dir.join(&wallpaper_data.original_file.file_name);
-        if file_path.exists() {
-            fs::remove_file(file_path).await?;
-        }
-        let file_path = dir.join(&wallpaper_data.thumbnail_file.file_name);
-        if file_path.exists() {
-            fs::remove_file(file_path).await?;
-        }
-        if let Some(upscaled_file) = wallpaper_data.upscaled_file {
-            let upscaled_file = dir.join(&upscaled_file.file_name);
-            if upscaled_file.exists() {
-                fs::remove_file(upscaled_file).await?;
-            }
-        }
-
-        // Remove the database entry
-        tree.remove(packet.uuid)?;
+    // Retrieve the existing entry without holding mutable reference when not needed
+    let wallpaper = if let Some(wallpaper) = database.wallpapers.get(&packet.uuid) {
+        wallpaper.clone() // Clone the wallpaper to work with it and allow removing from the hashmap later
     } else {
         return Err(anyhow::anyhow!("No entry found for UUID"));
+    };
+
+    // Remove all associated files
+    let dir = Path::new("wallpapers");
+    let file_path = dir.join(&wallpaper.original_file.file_name);
+    if file_path.exists() {
+        fs::remove_file(file_path).await?;
     }
+    let file_path = dir.join(&wallpaper.thumbnail_file.file_name);
+    if file_path.exists() {
+        fs::remove_file(file_path).await?;
+    }
+    if let Some(upscaled_file) = &wallpaper.upscaled_file {
+        let upscaled_file = dir.join(&upscaled_file.file_name);
+        if upscaled_file.exists() {
+            fs::remove_file(upscaled_file).await?;
+        }
+    }
+
+    // Remove the database entry
+    database.wallpapers.remove(&packet.uuid);
+    write_database(&database).await?;
 
     Ok(())
 }
