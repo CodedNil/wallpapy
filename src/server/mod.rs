@@ -38,7 +38,7 @@ async fn read_database() -> Result<Database> {
 }
 
 async fn write_database(database: &Database) -> Result<()> {
-    let pretty = ron::ser::PrettyConfig::new();
+    let pretty = ron::ser::PrettyConfig::new().compact_arrays(true);
     let data = ron::ser::to_string_pretty(database, pretty)?;
     fs::write(DATABASE_FILE, data).await?;
     Ok(())

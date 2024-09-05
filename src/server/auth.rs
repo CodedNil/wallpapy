@@ -64,7 +64,7 @@ async fn read_accounts() -> Result<Accounts> {
 }
 
 async fn write_accounts(accounts: &Accounts) -> Result<()> {
-    let pretty = ron::ser::PrettyConfig::new();
+    let pretty = ron::ser::PrettyConfig::new().compact_arrays(true);
     let data = ron::ser::to_string_pretty(accounts, pretty)?;
     fs::write(AUTH_FILE, data).await?;
     Ok(())
