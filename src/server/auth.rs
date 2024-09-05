@@ -58,7 +58,7 @@ fn login_impl(packet: &LoginPacket) -> Result<String> {
         .map_err(|e| anyhow!("Failed to open tree: {:?}", e))?;
 
     // Create initial admin account if no accounts exist
-    if tree.is_empty()? {
+    if tree.is_empty() {
         if packet.password.len() < MIN_PASSWORD_LENGTH {
             return Err(anyhow!(
                 "Password must be at least {} characters long",

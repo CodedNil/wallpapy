@@ -38,6 +38,7 @@ pub async fn start_server() {
                     .filter_map(|v| v.ok().and_then(|bytes| bincode::deserialize(&bytes).ok()))
                     .max_by_key(|wallpaper: &WallpaperData| wallpaper.datetime)
                     .map_or(cur_time, |image| image.datetime);
+                log::info!("Time since last wallpaper: {:?}", cur_time - latest_time);
                 if cur_time - latest_time > NEW_WALLPAPER_INTERVAL {
                     if let Err(err) = image::generate_wallpaper_impl(None, None).await {
                         log::error!("Error generating wallpaper: {:?}", err);
