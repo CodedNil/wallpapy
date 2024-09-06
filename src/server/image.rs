@@ -218,8 +218,9 @@ pub async fn like(packet: Bytes) -> impl IntoResponse {
     match result {
         Ok(wallpaper) => {
             // Rerun the upscaling if the image was liked, with quality upscaler
-            if wallpaper.liked_state == LikedState::Liked
-                || wallpaper.liked_state == LikedState::Loved
+            if wallpaper.upscaled_file.is_none()
+                && (wallpaper.liked_state == LikedState::Liked
+                    || wallpaper.liked_state == LikedState::Loved)
             {
                 tokio::spawn(async move {
                     let _ = upscale_wallpaper_impl(packet.uuid, wallpaper).await;
