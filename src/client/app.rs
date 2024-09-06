@@ -474,7 +474,7 @@ impl Wallpapy {
             loved_button_rect,
             ui_scale,
             if wallpaper.liked_state == LikedState::Loved {
-                Color32::from_rgb(170, 120, 10)
+                Color32::from_rgb(140, 90, 0)
             } else {
                 Color32::BLACK
             }
@@ -552,8 +552,8 @@ impl Wallpapy {
             ui_scale,
             match wallpaper.liked_state {
                 LikedState::Loved => Color32::from_rgb(170, 120, 10),
-                LikedState::Liked => Color32::DARK_GREEN,
-                LikedState::Disliked => Color32::DARK_RED,
+                LikedState::Liked => Color32::from_rgb(40, 70, 40),
+                LikedState::Disliked => Color32::from_rgb(100, 20, 20),
                 LikedState::None => Color32::BLACK,
             }
             .gamma_multiply(0.9),
