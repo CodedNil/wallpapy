@@ -386,7 +386,7 @@ impl Wallpapy {
             }
         }
 
-        // Add thumbs down button left of delete
+        // Add thumbs down button
         let thumbs_down_button_rect = egui::Align2::RIGHT_TOP.anchor_size(
             delete_button_rect.left_top() + vec2(-10.0, 0.0),
             delete_button_size,
@@ -425,7 +425,7 @@ impl Wallpapy {
             }
         }
 
-        // Add thumbs up button left of thumbs down
+        // Add thumbs up button
         let thumbs_up_button_rect = egui::Align2::RIGHT_TOP.anchor_size(
             thumbs_down_button_rect.left_top() + vec2(-10.0, 0.0),
             delete_button_size,
@@ -435,7 +435,7 @@ impl Wallpapy {
             thumbs_up_button_rect,
             ui_scale,
             if wallpaper.liked_state == LikedState::Liked {
-                Color32::from_rgb(160, 100, 0)
+                Color32::DARK_GREEN
             } else {
                 Color32::BLACK
             }
@@ -464,9 +464,48 @@ impl Wallpapy {
             }
         }
 
-        // Add recreate button left of thumbs up
-        let recreate_button_rect = egui::Align2::RIGHT_TOP.anchor_size(
+        // Add loved button
+        let loved_button_rect = egui::Align2::RIGHT_TOP.anchor_size(
             thumbs_up_button_rect.left_top() + vec2(-10.0, 0.0),
+            delete_button_size,
+        );
+        let is_hovering = ui.rect_contains_pointer(loved_button_rect);
+        painter.add(Shape::rect_filled(
+            loved_button_rect,
+            ui_scale,
+            if wallpaper.liked_state == LikedState::Loved {
+                Color32::from_rgb(170, 120, 10)
+            } else {
+                Color32::BLACK
+            }
+            .gamma_multiply(if is_hovering { 1.0 } else { 0.8 }),
+        ));
+        painter.text(
+            loved_button_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            egui_phosphor::regular::HEART,
+            FontId::proportional(ui_scale),
+            Color32::WHITE,
+        );
+        if is_hovering {
+            sub_button_hovered = true;
+            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+            if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
+                let toasts_store = self.toasts.clone();
+                let network_store = self.network_data.clone();
+                like_image(
+                    &self.host,
+                    &self.stored.auth_token,
+                    &wallpaper.id,
+                    LikedState::Loved,
+                    move |result| button_pressed_result(result, &network_store, &toasts_store, ""),
+                );
+            }
+        }
+
+        // Add recreate button
+        let recreate_button_rect = egui::Align2::RIGHT_TOP.anchor_size(
+            loved_button_rect.left_top() + vec2(-10.0, 0.0),
             delete_button_size,
         );
         let is_hovering = ui.rect_contains_pointer(recreate_button_rect);
@@ -512,11 +551,12 @@ impl Wallpapy {
             prompt_rect.expand(ui_scale * 0.5625),
             ui_scale,
             match wallpaper.liked_state {
-                LikedState::Liked => Color32::from_rgb(160, 100, 0),
+                LikedState::Loved => Color32::from_rgb(170, 120, 10),
+                LikedState::Liked => Color32::DARK_GREEN,
                 LikedState::Disliked => Color32::DARK_RED,
                 LikedState::None => Color32::BLACK,
             }
-            .gamma_multiply(0.8),
+            .gamma_multiply(0.9),
         ));
         painter.galley(prompt_rect.min, prompt_galley, Color32::WHITE);
 

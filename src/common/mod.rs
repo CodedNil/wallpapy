@@ -43,8 +43,9 @@ pub struct ImageFile {
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum LikedState {
     None,
-    Liked,
     Disliked,
+    Liked,
+    Loved,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

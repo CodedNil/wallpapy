@@ -178,7 +178,8 @@ pub async fn generate(message: Option<String>) -> Result<(String, String)> {
         let datetime_text = date.format(&format).unwrap();
         history_string.push_str(&match data {
             DatabaseObjectType::Wallpaper(wallpaper) => {
-                let liked_state = match wallpaper.liked_state {
+                let liked_state: &str = match wallpaper.liked_state {
+                    LikedState::Loved => " (user LOVED this)",
                     LikedState::Liked => " (user liked this)",
                     LikedState::Disliked => " (user disliked this)",
                     LikedState::None => "",
