@@ -179,16 +179,12 @@ pub async fn smartget() -> impl IntoResponse {
         Month::June | Month::July => (4, 21),
     };
 
-    let time_of_day = if hour == sunrise_hour {
-        TimeOfDay::Sunrise
-    } else if hour > sunrise_hour && hour <= 11 {
-        TimeOfDay::Morning
-    } else if hour == 12 {
-        TimeOfDay::Midday
-    } else if hour >= 13 && hour < sunset_hour {
-        TimeOfDay::Afternoon
-    } else if hour == sunset_hour {
-        TimeOfDay::Sunset
+    let time_of_day = if (hour > sunrise_hour - 1 && hour < sunrise_hour + 1)
+        || hour > sunset_hour - 1 && hour < sunset_hour + 1
+    {
+        TimeOfDay::GoldenHour
+    } else if hour > sunrise_hour && hour < sunset_hour {
+        TimeOfDay::Day
     } else {
         TimeOfDay::Night
     };

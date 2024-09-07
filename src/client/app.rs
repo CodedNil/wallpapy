@@ -250,7 +250,7 @@ impl Wallpapy {
                                 .background_color(match vision.brightness {
                                     Brightness::Dark => Color32::from_gray(0),
                                     Brightness::Dim => Color32::from_gray(50),
-                                    Brightness::Normal => Color32::from_gray(100),
+                                    Brightness::Neutral => Color32::from_gray(100),
                                     Brightness::Bright => Color32::from_gray(150),
                                     Brightness::Light => Color32::from_gray(200),
                                 })

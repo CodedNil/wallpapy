@@ -91,18 +91,15 @@ pub enum LikedState {
 pub enum Brightness {
     Dark,
     Dim,
-    Normal,
+    Neutral,
     Bright,
     Light,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, VariantNames, Display)]
 pub enum TimeOfDay {
-    Sunrise,
-    Morning,
-    Midday,
-    Afternoon,
-    Sunset,
+    GoldenHour,
+    Day,
     Night,
 }
 
@@ -146,7 +143,6 @@ pub enum ColorPalette {
     Earthy,
     Neon,
     Sepia,
-    Aquatic,
 
     // Intensity
     Vibrant,
@@ -164,7 +160,6 @@ pub enum Season {
     Winter,
     Other,
     Unknown,
-    None,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, VariantNames, Display)]

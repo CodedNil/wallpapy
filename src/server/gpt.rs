@@ -8,6 +8,8 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
 use image::DynamicImage;
+use rand::seq::SliceRandom;
+use rand::Rng;
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -155,7 +157,20 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
     }
     let history_string = history_string.join("\n\n");
 
-    let user_message = message.map_or_else(String::new, |message| format!("'{message}' "));
+    let user_message = message.map_or_else(
+        || {
+            let random_number = rand::thread_rng().gen_range(1..=3);
+            if random_number == 1 {
+                String::new()
+            } else {
+                format!(
+                    "at {}, ",
+                    TimeOfDay::VARIANTS.choose(&mut rand::thread_rng()).unwrap()
+                )
+            }
+        },
+        |message| format!("'{message}', "),
+    );
     let request_body = json!({
         "model": "gpt-4o-mini",
         "messages": [
@@ -171,7 +186,7 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
             },
             {
                 "role": "system",
-                "content": format!("You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines, follow the prompt guidelines for best results, prioritise users comments as feedback, aim for variety above all else, every image should be totally distinct to the previous ones, the overall style direction is '{}' (include this in every prompt, not exact wording but the meaning)", database.key_style)
+                "content": format!("You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines, follow the prompt guidelines for best results, prioritise users comments as feedback, aim for variety above all else, every image should be totally refreshing with nothing in common with the previous few, the overall style direction is '{}' (include this in every prompt, not exact wording but the meaning)", database.key_style)
             },
             {
                 "role": "user",
