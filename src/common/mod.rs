@@ -43,7 +43,6 @@ pub struct ImageFile {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PromptData {
-    pub style: String,
     pub prompt: String,
     pub shortened_prompt: String,
 }
@@ -237,6 +236,7 @@ pub enum DatabaseObjectType {
 
 #[derive(Serialize, Deserialize)]
 pub struct GetWallpapersResponse {
+    pub key_style: String,
     pub images: Vec<WallpaperData>,
     pub comments: Vec<CommentData>,
 }

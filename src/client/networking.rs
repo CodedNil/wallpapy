@@ -192,3 +192,24 @@ pub fn recreate_image(
         }),
     );
 }
+
+pub fn edit_key_style(
+    host: &str,
+    token: &str,
+    new: &str,
+    on_done: impl 'static + Send + FnOnce(Result<()>),
+) {
+    ehttp::fetch(
+        ehttp::Request::post(
+            format!("http://{host}/keystyle"),
+            bincode::serialize(&TokenStringPacket {
+                token: token.to_string(),
+                string: new.to_string(),
+            })
+            .unwrap(),
+        ),
+        Box::new(move |_| {
+            on_done(Ok(()));
+        }),
+    );
+}

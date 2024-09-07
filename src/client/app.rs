@@ -1,7 +1,7 @@
 use crate::{
     client::networking::{
-        add_comment, generate_wallpaper, get_gallery, like_image, login, recreate_image,
-        remove_comment, remove_image,
+        add_comment, edit_key_style, generate_wallpaper, get_gallery, like_image, login,
+        recreate_image, remove_comment, remove_image,
     },
     common::{
         Brightness, CommentData, DatabaseObjectType, GetWallpapersResponse, LikedState,
@@ -29,6 +29,7 @@ nestify::nest! {
         wallpapers: Option<Vec<WallpaperData>>,
         comments: Option<Vec<CommentData>>,
         fullscreen_image: Option<WallpaperData>,
+        key_style: String,
 
         #>[derive(Deserialize, Serialize, Default)]
         #>[serde(default)]
@@ -75,6 +76,7 @@ impl Wallpapy {
             toasts: Arc::new(Mutex::new(Toasts::default())),
             wallpapers: None,
             comments: None,
+            key_style: String::new(),
             fullscreen_image: None,
             stored,
             login_form: LoginForm {
@@ -165,6 +167,23 @@ impl Wallpapy {
                     self.stored.auth_token.clear();
                 }
             });
+            ui.horizontal(|ui| {
+                if ui.button("Update").clicked() {
+                    let toasts_store = self.toasts.clone();
+                    let network_store = self.network_data.clone();
+                    edit_key_style(
+                        &self.host,
+                        &self.stored.auth_token,
+                        self.key_style.trim(),
+                        move |result| {
+                            button_pressed_result(result, &network_store, &toasts_store, "");
+                        },
+                    );
+                }
+                TextEdit::singleline(&mut self.key_style)
+                    .desired_width(f32::INFINITY)
+                    .ui(ui);
+            });
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -189,18 +208,6 @@ impl Wallpapy {
                     .ui(ui);
 
                     let font_id = FontId::proportional(20.0);
-                    if ui
-                        .button(
-                            RichText::new(wallpaper.prompt_data.style.clone())
-                                .font(font_id.clone()),
-                        )
-                        .clicked()
-                    {
-                        ui.output_mut(|o: &mut egui::PlatformOutput| {
-                            o.copied_text.clone_from(&wallpaper.prompt_data.style);
-                            self.toasts.lock().info("Style copied to clipboard");
-                        });
-                    }
                     if ui
                         .button(
                             RichText::new(wallpaper.prompt_data.shortened_prompt.clone())
@@ -766,9 +773,10 @@ impl Wallpapy {
             }
             GetGalleryState::Done(ref response) => {
                 match response {
-                    Ok(wallpapers) => {
-                        self.wallpapers = Some(wallpapers.images.clone());
-                        self.comments = Some(wallpapers.comments.clone());
+                    Ok(database) => {
+                        self.key_style.clone_from(&database.key_style);
+                        self.wallpapers = Some(database.images.clone());
+                        self.comments = Some(database.comments.clone());
                     }
                     Err(e) => {
                         log::error!("Failed to fetch galleries: {:?}", e);

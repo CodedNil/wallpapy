@@ -60,10 +60,11 @@ pub async fn generate(packet: Bytes) -> impl IntoResponse {
 pub async fn get() -> impl IntoResponse {
     match read_database().await {
         Ok(database) => {
-            let images = database.wallpapers.values().cloned().collect();
-            let comments = database.comments.values().cloned().collect();
-
-            match bincode::serialize(&GetWallpapersResponse { images, comments }) {
+            match bincode::serialize(&GetWallpapersResponse {
+                key_style: database.key_style,
+                images: database.wallpapers.values().cloned().collect(),
+                comments: database.comments.values().cloned().collect(),
+            }) {
                 Ok(data) => (StatusCode::OK, data).into_response(),
                 Err(e) => {
                     log::error!("{:?}", e);
@@ -478,8 +479,13 @@ pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper: WallpaperData) -> Resul
     let image = image::open(&image_path)?;
 
     // Upscale the image using the high quality upscaler
-    let (upscaled_url, upscaled_image) =
-        upscale_image(&client, &api_token, &image, &wallpaper.prompt_data.prompt).await?;
+    let (upscaled_url, upscaled_image) = upscale_image(
+        &client,
+        &api_token,
+        &image,
+        &wallpaper.prompt_data.shortened_prompt,
+    )
+    .await?;
     log::info!("Upscaled image: {}", &upscaled_url);
     let upscaled_image = upscaled_image.resize_to_fill(2560, 1440, FilterType::Lanczos3);
 
@@ -702,8 +708,8 @@ async fn upscale_image(
             "version": "dfad41707589d68ecdccd1dfa600d55a208f9310748e44bfe35b4a6291453d5e",
             "input": {
                 "image": image_uri,
-                "prompt": format!("masterpiece, best quality, highres, <lora:more_details:0.1> <lora:SDXLrender_v2.0:1>, {}", prompt),
-                "negative_prompt": "(worst quality, low quality, normal quality:2) JuggernautNegative-neg, (signature:3, signed, watermark, inscription, writing, text)",
+                "prompt": format!("{}, painting, wallpaper, masterpiece, best quality, highres", prompt),
+                "negative_prompt": "(worst quality, low quality, normal quality:2), realistic, (signature:3, signed, watermark, inscription, writing, text)",
                 "dynamic": 6,
                 "handfix": "disabled",
                 "sharpen": 0,

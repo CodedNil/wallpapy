@@ -18,6 +18,7 @@ const DATABASE_FILE: &str = "database.ron";
 
 #[derive(Serialize, Deserialize)]
 struct Database {
+    key_style: String,
     wallpapers: HashMap<Uuid, WallpaperData>,
     comments: HashMap<Uuid, CommentData>,
 }
@@ -25,6 +26,7 @@ struct Database {
 async fn read_database() -> Result<Database> {
     if fs::metadata(DATABASE_FILE).await.is_err() {
         return Ok(Database {
+            key_style: String::new(),
             wallpapers: HashMap::new(),
             comments: HashMap::new(),
         });

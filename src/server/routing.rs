@@ -1,8 +1,4 @@
-use crate::server::{
-    auth::login_server,
-    commenting::{add_comment, remove_comment},
-    image, read_database,
-};
+use crate::server::{auth::login_server, commenting, image, read_database};
 use axum::{
     routing::{get, post},
     Router,
@@ -18,11 +14,12 @@ pub fn setup_routes(app: Router) -> Router {
         .route("/favourites", get(image::favourites))
         .route("/smartget", get(image::smartget))
         .route("/generate", post(image::generate))
-        .route("/commentadd", post(add_comment))
-        .route("/commentremove", post(remove_comment))
+        .route("/commentadd", post(commenting::add))
+        .route("/commentremove", post(commenting::remove))
         .route("/imageliked", post(image::like))
         .route("/imageremove", post(image::remove))
         .route("/imagerecreate", post(image::recreate))
+        .route("/keystyle", post(commenting::key_style))
 }
 
 pub async fn start_server() {

@@ -4,7 +4,7 @@ use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
 use time::{format_description, OffsetDateTime};
 use uuid::Uuid;
 
-pub async fn add_comment(packet: Bytes) -> impl IntoResponse {
+pub async fn add(packet: Bytes) -> impl IntoResponse {
     let packet: TokenStringPacket = match bincode::deserialize(&packet) {
         Ok(packet) => packet,
         Err(e) => {
@@ -48,7 +48,7 @@ pub async fn add_comment(packet: Bytes) -> impl IntoResponse {
     }
 }
 
-pub async fn remove_comment(packet: Bytes) -> impl IntoResponse {
+pub async fn remove(packet: Bytes) -> impl IntoResponse {
     let packet: TokenUuidPacket = match bincode::deserialize(&packet) {
         Ok(packet) => packet,
         Err(e) => {
@@ -73,6 +73,35 @@ pub async fn remove_comment(packet: Bytes) -> impl IntoResponse {
         Ok(()) => StatusCode::OK,
         Err(e) => {
             log::error!("Errored remove_comment {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
+}
+
+pub async fn key_style(packet: Bytes) -> impl IntoResponse {
+    let packet: TokenStringPacket = match bincode::deserialize(&packet) {
+        Ok(packet) => packet,
+        Err(e) => {
+            log::error!("Failed to deserialize key_style packet: {:?}", e);
+            return StatusCode::BAD_REQUEST;
+        }
+    };
+    if !matches!(verify_token(&packet.token).await, Ok(true)) {
+        log::error!("Unauthorized key_style request");
+        return StatusCode::UNAUTHORIZED;
+    }
+
+    let result = async {
+        let mut database = read_database().await?;
+        database.key_style = packet.string;
+        write_database(&database).await
+    }
+    .await;
+
+    match result {
+        Ok(()) => StatusCode::OK,
+        Err(e) => {
+            log::error!("Errored key_style {:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         }
     }

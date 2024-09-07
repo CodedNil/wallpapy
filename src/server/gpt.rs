@@ -34,17 +34,9 @@ Better: “A close-up portrait of a middle-aged woman with curly red hair, green
 
 Example Prompt: A hyperrealistic portrait of a weathered sailor in his 60s, with deep-set blue eyes, a salt-and-pepper beard, and sun-weathered skin. He’s wearing a faded blue captain’s hat and a thick wool sweater. The background shows a misty harbor at dawn, with fishing boats barely visible in the distance.
 
-Use Artistic References
-    Referencing specific artists, art movements, or styles can help guide FLUX.1’s output.
-    Example Prompt: Create an image in the style of Vincent van Gogh’s “Starry Night,” but replace the village with a futuristic cityscape. Maintain the swirling, expressive brushstrokes and vibrant color palette of the original, emphasizing deep blues and bright yellows. The city should have tall, glowing skyscrapers that blend seamlessly with the swirling sky.
-
 Specify Technical Details
     Including camera settings, angles, and other technical aspects can significantly influence the final image.
     Example Prompt: Capture a street food vendor in Tokyo at night, shot with a wide-angle lens (24mm) at f/1.8. Use a shallow depth of field to focus on the vendor’s hands preparing takoyaki, with the glowing street signs and bustling crowd blurred in the background. High ISO setting to capture the ambient light, giving the image a slight grain for a cinematic feel.
-
-Blend Concepts
-    FLUX.1 excels at combining different ideas or themes to create unique images.
-    Example Prompt: Illustrate “The Last Supper” by Leonardo da Vinci, but reimagine it with robots in a futuristic setting. Maintain the composition and dramatic lighting of the original painting, but replace the apostles with various types of androids and cyborgs. The table should be a long, sleek metal surface with holographic displays. In place of bread and wine, have the robots interfacing with glowing data streams.
 
 Use Contrast and Juxtaposition
     Creating contrast within your prompt can lead to visually striking and thought-provoking images.
@@ -69,6 +61,27 @@ Common Pitfalls to Avoid
     Ignoring Lighting and Atmosphere: These elements greatly influence the mood and realism of the generated image.
     Being Too Vague: Extremely general prompts may lead to generic or unpredictable results.
     Forgetting About Style: Unless specified, FLUX.1 may default to a realistic style. Always indicate if you want a particular artistic approach.
+
+
+Examples
+
+A captivating abstract portrait of a woman's face that artfully blends her features with a nighttime forest landscape filled with fireflies. The eyes, nose, and lips stand out in vivid contrast to the surrounding colors, creating a mesmerizing interplay of deep blues, purples, and vibrant hues of red, green, and yellow. The silhouette of the face, with its intense and evocative mood, is enhanced by the dynamic, chaotic environment in the background. This masterful piece combines elements of wildlife photography, illustration, painting, and conceptual art, evoking a powerful sense of emotion and passion., conceptual art, graffiti, wildlife photography, dark fantasy, painting, vibrant, illustration
+
+A visually striking dark fantasy portrait of a majestic horse galloping through a stormy, fiery landscape. The horse's glossy black coat is a stark contrast to its vivid, flame-like mane and tail, which seems to be made of real fire. Its glowing, fiery hooves leave a trail of embers behind, while its intense, glistening eyes reflect a fierce, unbridled energy. The background features a haunting, stormy red sky filled with ominous lightning, adding to the overall sense of mystique and intrigue. This captivating image blends the mediums of photo, painting, and portrait photography to create a unique, conceptual art piece., painting, portrait photography, vibrant, photo, conceptual art, dark fantasy
+
+Blend the surrealism of Salvador Dalí with the geometric abstraction of Piet Mondrian to depict a melting cityscape. Use Dalí's soft, drooping forms for skyscrapers that are liquefying, but render them in Mondrian's characteristic primary colors and black grid lines. The sky should be divided into rectangles of different shades of blue and white, with a few of Dalí's signature clouds scattered about
+
+Create a split-screen image. On the left, show a extreme close-up of a human eye, with intricate details of the iris visible. On the right, depict a vast spiral galaxy. The colors and patterns of the iris should mirror the structure of the galaxy, implying a connection between the micro and macro scales. Use a rich color palette with deep blues, purples, and flecks of gold in both halves of the image
+
+Illustrate the four seasons of a single landscape in one continuous panoramic image. From left to right, transition from winter to spring to summer to fall. Start with a snow-covered forest, then show the same trees budding with new leaves, followed by lush summer growth, and ending with autumn colors. Include a small cabin that remains constant throughout, but show how its surroundings change. Subtly alter the lighting from cool winter tones to warm summer hues and back to the golden light of fall
+
+Create an abstract representation of the emotional journey from depression to hope using only colors, shapes, and textures. Start from the left with dark, heavy shapes in blues and greys, gradually transitioning to lighter, more vibrant colors on the right. Use rough, jagged textures on the left, slowly morphing into smoother, flowing forms. End with bright yellows and soft, rounded shapes. Don't include any recognizable objects or figures – focus solely on the emotive power of abstract visual elements
+
+Create a surreal, ethereal dreamscape with floating islands, bioluminescent plants, and a sky filled with multiple moons of different colors. Include a solitary figure on one of the islands, gazing at the celestial display
+
+Design a mythical creature that combines elements of a lion, an eagle, and a dragon. Place this creature in a majestic mountain setting with a dramatic sunset in the background
+
+Create an abstract representation of the emotion 'hope' using a palette of warm colors. Incorporate flowing shapes and subtle human silhouettes to suggest a sense of movement and aspiration
 ";
 
 pub async fn generate(message: Option<String>) -> Result<PromptData> {
@@ -81,6 +94,7 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
         Err(e) => {
             log::error!("Failed accessing database {:?}", e);
             Database {
+                key_style: String::new(),
                 wallpapers: HashMap::new(),
                 comments: HashMap::new(),
             }
@@ -121,7 +135,10 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
                 let vision = wallpaper.vision_data;
                 let details = [
                     format!("{datetime_text} - Wallpaper{liked_state} created"),
-                    format!("Prompt was: '{}'", wallpaper.prompt_data.prompt),
+                    format!(
+                        "Image Description: '{}'",
+                        wallpaper.prompt_data.shortened_prompt
+                    ),
                     format!("Time: {} - Season: {}", vision.time_of_day, vision.season,),
                 ];
                 let filtered_details: Vec<String> = details
@@ -154,7 +171,7 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
             },
             {
                 "role": "system",
-                "content": "You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines, follow the prompt guidelines for best results, prioritise users comments as feedback, aim for variety above all else, every image should be totally distinct to the previous ones"
+                "content": format!("You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines, follow the prompt guidelines for best results, prioritise users comments as feedback, aim for variety above all else, every image should be totally distinct to the previous ones, the overall style direction is '{}' (include this in every prompt, not exact wording but the meaning)", database.key_style)
             },
             {
                 "role": "user",
@@ -168,17 +185,13 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
             "schema": {
               "type": "object",
               "properties": {
-                "style": {
-                    "type": "string",
-                    "description": "The style of the image, max 25 words",
-                },
                 "prompt": { "type": "string" },
                 "shortened_prompt": {
                     "type": "string",
                     "description": "A shortened version of the prompt, only including the image description, max 25 words",
                 },
               },
-              "required": ["style", "prompt", "shortened_prompt"],
+              "required": ["prompt", "shortened_prompt"],
               "additionalProperties": false
             },
             "strict": true
