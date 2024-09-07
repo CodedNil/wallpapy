@@ -4,8 +4,8 @@ use crate::{
         remove_comment, remove_image,
     },
     common::{
-        utils::vec_str, Brightness, CommentData, DatabaseObjectType, GetWallpapersResponse,
-        LikedState, WallpaperData,
+        Brightness, CommentData, DatabaseObjectType, GetWallpapersResponse, LikedState,
+        WallpaperData,
     },
     PORT,
 };
@@ -19,7 +19,7 @@ use egui_pull_to_refresh::PullToRefresh;
 use egui_thumbhash::ThumbhashImage;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{fmt::Display, sync::Arc};
 
 nestify::nest! {
     pub struct Wallpapy {
@@ -882,4 +882,12 @@ fn button_pressed_result(
 
 const fn slice_to_color32(rgb: [u8; 3]) -> Color32 {
     Color32::from_rgb(rgb[0], rgb[1], rgb[2])
+}
+
+pub fn vec_str<T: Display>(items: &[T]) -> String {
+    items
+        .iter()
+        .map(|item| format!("{item}"))
+        .collect::<Vec<String>>()
+        .join(", ")
 }

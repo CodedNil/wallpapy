@@ -16,6 +16,7 @@ pub fn setup_routes(app: Router) -> Router {
         .route("/get", get(image::get))
         .route("/latest", get(image::latest))
         .route("/favourites", get(image::favourites))
+        .route("/smartget", get(image::smartget))
         .route("/generate", post(image::generate))
         .route("/commentadd", post(add_comment))
         .route("/commentremove", post(remove_comment))

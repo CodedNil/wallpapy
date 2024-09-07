@@ -172,23 +172,13 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
                     "type": "string",
                     "description": "The style of the image, max 25 words",
                 },
-                "time_of_day": {
-                    "type": "string",
-                    "description": "The time of day for the image",
-                    "enum": TimeOfDay::VARIANTS
-                },
-                "season": {
-                    "type": "string",
-                    "description": "The season for the image",
-                    "enum": Season::VARIANTS
-                },
                 "prompt": { "type": "string" },
                 "shortened_prompt": {
                     "type": "string",
                     "description": "A shortened version of the prompt, only including the image description, max 25 words",
                 },
               },
-              "required": ["style", "time_of_day", "season", "prompt", "shortened_prompt"],
+              "required": ["style", "prompt", "shortened_prompt"],
               "additionalProperties": false
             },
             "strict": true

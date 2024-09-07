@@ -1,6 +1,6 @@
 use crate::common::{
-    ColorData, GetWallpapersResponse, ImageFile, LikedState, PromptData, TokenStringPacket,
-    TokenUuidLikedPacket, TokenUuidPacket, WallpaperData,
+    ColorData, GetWallpapersResponse, ImageFile, LikedState, PromptData, TimeOfDay,
+    TokenStringPacket, TokenUuidLikedPacket, TokenUuidPacket, WallpaperData,
 };
 use crate::server::{auth::verify_token, gpt, read_database, write_database};
 use anyhow::{anyhow, Result};
@@ -16,6 +16,7 @@ use serde_json::json;
 use std::io::Cursor;
 use std::{env, path::Path, time::Duration};
 use thumbhash::rgba_to_thumb_hash;
+use time::Month;
 use time::{
     format_description::{self, well_known::Rfc3339},
     OffsetDateTime,
@@ -126,6 +127,80 @@ pub async fn favourites() -> impl IntoResponse {
                 .wallpapers
                 .iter()
                 .filter(|(_, wallpaper)| matches!(wallpaper.liked_state, LikedState::Liked))
+                .map(|(_, wallpaper)| wallpaper.clone())
+                .collect::<Vec<_>>()
+                .choose(&mut rand::thread_rng())
+                .cloned();
+
+            if let Some(wallpaper) = liked_image {
+                let file_name = wallpaper.upscaled_file.as_ref().map_or_else(
+                    || wallpaper.original_file.file_name.clone(),
+                    |upscaled_file| upscaled_file.file_name.clone(),
+                );
+
+                let image_path = Path::new("wallpapers").join(&file_name);
+                match fs::read(&image_path).await {
+                    Ok(data) => {
+                        let mime_type = mime_guess::from_path(&image_path).first_or_octet_stream();
+                        let mut headers = HeaderMap::new();
+                        headers.insert(
+                            "Content-Type",
+                            HeaderValue::from_str(mime_type.as_ref()).unwrap(),
+                        );
+                        (StatusCode::OK, headers, data).into_response()
+                    }
+                    Err(e) => {
+                        log::error!("Failed to read image file: {:?}", e);
+                        StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                    }
+                }
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            }
+        }
+        Err(e) => {
+            log::error!("{:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+pub async fn smartget() -> impl IntoResponse {
+    let now = OffsetDateTime::now_utc();
+    let month = now.month();
+    let hour = now.hour();
+
+    let (sunrise_hour, sunset_hour) = match month {
+        Month::January | Month::February | Month::November | Month::December => (8, 16),
+        Month::March | Month::October => (7, 18),
+        Month::April | Month::September => (6, 19),
+        Month::May | Month::August => (5, 20),
+        Month::June | Month::July => (4, 21),
+    };
+
+    let time_of_day = if hour == sunrise_hour {
+        TimeOfDay::Sunrise
+    } else if hour > sunrise_hour && hour <= 11 {
+        TimeOfDay::Morning
+    } else if hour == 12 {
+        TimeOfDay::Midday
+    } else if hour >= 13 && hour < sunset_hour {
+        TimeOfDay::Afternoon
+    } else if hour == sunset_hour {
+        TimeOfDay::Sunset
+    } else {
+        TimeOfDay::Night
+    };
+
+    match read_database().await {
+        Ok(database) => {
+            let liked_image: Option<WallpaperData> = database
+                .wallpapers
+                .iter()
+                .filter(|(_, wallpaper)| {
+                    matches!(wallpaper.liked_state, LikedState::Liked)
+                        && wallpaper.vision_data.time_of_day == time_of_day
+                })
                 .map(|(_, wallpaper)| wallpaper.clone())
                 .collect::<Vec<_>>()
                 .choose(&mut rand::thread_rng())

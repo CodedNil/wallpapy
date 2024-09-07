@@ -3,8 +3,6 @@ use strum_macros::{Display, VariantNames};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-pub mod utils;
-
 #[derive(Serialize, Deserialize, Clone)]
 pub struct WallpaperData {
     pub id: Uuid,
@@ -48,9 +46,6 @@ pub struct PromptData {
     pub style: String,
     pub prompt: String,
     pub shortened_prompt: String,
-
-    pub time_of_day: TimeOfDay,
-    pub season: Season,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -104,13 +99,11 @@ pub enum Brightness {
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, VariantNames, Display)]
 pub enum TimeOfDay {
-    Dawn,
     Sunrise,
     Morning,
     Midday,
     Afternoon,
     Sunset,
-    Dusk,
     Night,
 }
 
