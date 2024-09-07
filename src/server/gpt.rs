@@ -1,10 +1,19 @@
-use crate::common::{DatabaseObjectType, LikedState};
+use crate::common::utils::vec_str;
+use crate::common::{
+    Brightness, ColorPalette, DatabaseObjectType, ImageMood, LikedState, PromptData, Season,
+    SubjectMatter, TimeOfDay, VisionData, Weather,
+};
 use crate::server::{read_database, Database};
 use anyhow::{anyhow, Result};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use image::codecs::jpeg::JpegEncoder;
+use image::imageops::FilterType;
+use image::DynamicImage;
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::env;
+use strum::VariantNames;
 use time::format_description;
 
 const PROMPT_GUIDELINES: &str = "A well-crafted FLUX.1 prompt typically includes the following components:
@@ -140,7 +149,10 @@ Common Pitfalls to Avoid
     Forgetting About Style: Unless specified, FLUX.1 may default to a realistic style. Always indicate if you want a particular artistic approach.
 ";
 
-pub async fn generate(message: Option<String>) -> Result<(String, String)> {
+pub async fn generate(message: Option<String>) -> Result<PromptData> {
+    let client = Client::new();
+    let api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
+
     // Read the database
     let database = match read_database().await {
         Ok(db) => db,
@@ -172,11 +184,11 @@ pub async fn generate(message: Option<String>) -> Result<(String, String)> {
         .collect::<Vec<_>>();
     database_history.sort_by_key(|(datetime, _)| *datetime);
 
-    let mut history_string = String::new();
+    let mut history_string = Vec::new();
     for (date, data) in database_history {
         let format = format_description::parse("[day]/[month]/[year] [hour]:[minute]").unwrap();
         let datetime_text = date.format(&format).unwrap();
-        history_string.push_str(&match data {
+        history_string.push(match data {
             DatabaseObjectType::Wallpaper(wallpaper) => {
                 let liked_state: &str = match wallpaper.liked_state {
                     LikedState::Loved => " (user LOVED this)",
@@ -184,26 +196,53 @@ pub async fn generate(message: Option<String>) -> Result<(String, String)> {
                     LikedState::Disliked => " (user disliked this)",
                     LikedState::None => "",
                 };
-                let prompt = wallpaper.prompt_short;
-                format!("{datetime_text}: Wallpaper{liked_state} created with design: '{prompt}'")
+                let vision = wallpaper.vision_data;
+                let details = [
+                    format!("{datetime_text} - Wallpaper{liked_state} created"),
+                    format!("\tPrompt was: '{}'", wallpaper.prompt_data.prompt),
+                    format!(
+                        "\tColors: {}, {}, {}",
+                        vision.primary_color, vision.secondary_color, vision.tertiary_color
+                    ),
+                    format!(
+                        "\tTime: {} - Season: {} - Weather: {}",
+                        vision.time_of_day,
+                        vision.season,
+                        vec_str(&vision.weather)
+                    ),
+                    format!("\tTags: {}", vec_str(&vision.tags)),
+                    format!("\tMoods: {}", vec_str(&vision.image_mood)),
+                    format!("\tPalette: {}", vec_str(&vision.color_palette)),
+                    format!("\tSubject: {}", vec_str(&vision.subject_matter)),
+                    format!("\tWhat worked well: {}", vision.what_worked_well),
+                    format!("\tWhat didn't work: {}", vision.what_didnt_work),
+                    format!(
+                        "\tDifferences in image output compared to prompt:  {}",
+                        vision.differences_from_prompt
+                    ),
+                    format!(
+                        "\tHow to improve prompt creation:  {}",
+                        vision.how_to_improve
+                    ),
+                ];
+                let filtered_details: Vec<String> = details
+                    .into_iter()
+                    .filter(|s| !s.trim().ends_with(':'))
+                    .collect();
+                filtered_details.join("\n")
             }
             DatabaseObjectType::Comment(comment) => {
                 let comment = comment.comment;
                 format!("{datetime_text}: User commented: '{comment}'")
             }
         });
-        history_string.push('\n');
     }
     if let Some(message) = message {
-        history_string.push_str(&format!("For this image the user requested: '{message}'"));
-        history_string.push('\n');
+        history_string.push(format!("For this image the user requested: '{message}'"));
     }
+    let history_string = history_string.join("\n\n");
 
-    let client = reqwest::Client::new();
-
-    let api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
-
-    let prompt = gpt(&client, &api_key, json!({
+    let request_body = json!({
         "model": "gpt-4o-mini",
         "messages": [
             {
@@ -213,36 +252,61 @@ pub async fn generate(message: Option<String>) -> Result<(String, String)> {
             },
             {
                 "role": "system",
-                "content": "You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines, follow the prompt guidelines for best results, prioritise users comments as feedback"
+                "name": "history",
+                "content": format!("History of previous prompts and comments:\n{history_string}")
             },
             {
                 "role": "system",
-                "name": "history",
-                "content": format!("History of previous prompts and comments:\n{history_string}")
+                "content": "You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines, follow the prompt guidelines for best results, prioritise users comments as feedback"
             },
             {
                 "role": "user",
                 "content": "Create me a new image prompt, Prompt:"
             }
         ],
+        "response_format": {
+          "type": "json_schema",
+          "json_schema": {
+            "name": "prompt_data",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "style": {
+                    "type": "string",
+                    "description": "The style of the image, max 25 words",
+                },
+                "time_of_day": {
+                    "type": "string",
+                    "description": "The time of day for the image",
+                    "enum": TimeOfDay::VARIANTS
+                },
+                "season": {
+                    "type": "string",
+                    "description": "The season for the image",
+                    "enum": Season::VARIANTS
+                },
+                "tags": {
+                    "type": "array",
+                    "description":  "The tags for the image, max 6, titlecase",
+                    "items": {
+                        "type": "string",
+                    }
+                },
+                "prompt": { "type": "string" },
+                "shortened_prompt": {
+                    "type": "string",
+                    "description": "A shortened version of the prompt, only including the image description, max 25 words",
+                },
+              },
+              "required": ["style", "time_of_day", "season", "tags", "prompt", "shortened_prompt"],
+              "additionalProperties": false
+            },
+            "strict": true
+          }
+        },
         "max_tokens": 4096
-    })).await?;
+    });
 
-    let prompt_short = gpt(&client, &api_key, json!({
-        "model": "gpt-4o-mini",
-        "messages": [
-            {
-                "role": "user",
-                "content": format!("Take this input '{prompt}' and return a shortened version of it, only including the image description, max 25 words")
-            }
-        ],
-        "max_tokens": 4096
-    })).await?;
-
-    Ok((prompt, prompt_short))
-}
-
-async fn gpt(client: &Client, api_key: &str, request_body: Value) -> Result<String> {
     let response = client
         .post("https://api.openai.com/v1/chat/completions")
         .header("Content-Type", "application/json")
@@ -250,13 +314,226 @@ async fn gpt(client: &Client, api_key: &str, request_body: Value) -> Result<Stri
         .json(&request_body)
         .send()
         .await?;
-
     let response_json: Value = response.json().await?;
-    response_json["choices"]
+    let json_response = response_json["choices"]
         .get(0)
         .and_then(|choice| choice["message"]["content"].as_str())
         .map_or_else(
-            || Err(anyhow!("No content found in response")),
+            || Err(anyhow!("No content found in response {}", response_json)),
             |content| Ok(content.to_string()),
-        )
+        )?;
+
+    let parsed_response: PromptData = serde_json::from_str(&json_response)?;
+
+    // Log token usage
+    let prompt_tokens = response_json["usage"]["prompt_tokens"].as_u64().unwrap();
+    let completition_tokens = response_json["usage"]["completion_tokens"]
+        .as_u64()
+        .unwrap();
+    let (prompt_ppm, completition_ppm) = (0.15, 0.6);
+    let (prompt_cost, completition_cost) = (
+        (prompt_ppm / 1_000_000.0) * prompt_tokens as f32,
+        (completition_ppm / 1_000_000.0) * completition_tokens as f32,
+    );
+    let total_cost = prompt_cost + completition_cost;
+    log::info!(
+        "Generated prompt using {} prompt tokens and {} completition tokens at ${}",
+        prompt_tokens,
+        completition_tokens,
+        total_cost,
+    );
+
+    Ok(parsed_response)
+}
+
+pub async fn vision_image(image: DynamicImage, prompt: &str) -> Result<VisionData> {
+    let api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not set");
+    let client = reqwest::Client::new();
+
+    let image = image.resize(854, 640, FilterType::Lanczos3);
+    let mut bytes = Vec::new();
+    let encoder = JpegEncoder::new_with_quality(&mut bytes, 90);
+    image.write_with_encoder(encoder)?;
+    let image_uri = format!("data:image/jpeg;base64,{}", STANDARD.encode(&bytes));
+
+    let request_body = json!({
+        "model": "gpt-4o-mini",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": format!("View this image and output data about it in required json schema, the image is a desktop wallpaper image created by a generative diffusion model, based on this prompt: '{prompt}'")
+                  },
+                  {
+                    "type": "image_url",
+                    "image_url": {
+                      "url": image_uri,
+                      "detail": "low"
+                    }
+                  }
+                ]
+            }
+        ],
+        "response_format": {
+          "type": "json_schema",
+          "json_schema": {
+            "name": "vision_data",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "primary_color": {
+                    "type": "string",
+                    "description": "The primary color of the image, color name"
+                },
+                "primary_color_rgb": {
+                    "type": "array",
+                    "description": "The primary color of the image, 3 u8 integers",
+                    "items": {
+                      "type": "number",
+                    },
+                },
+                "secondary_color": {
+                    "type": "string",
+                    "description": "The secondary color of the image, color name, blank if there is none"
+                },
+                "secondary_color_rgb": {
+                    "type": "array",
+                    "description": "The primary color of the image, 3 u8 integers, 3 zeros if there is none",
+                    "items": {
+                        "type": "number",
+                    },
+                },
+                "tertiary_color": {
+                    "type": "string",
+                    "description": "The tertiary color of the image, color name, blank if there is none"
+                },
+                "tertiary_color_rgb": {
+                    "type": "array",
+                    "description": "The primary color of the image, 3 u8 integers, 3 zeros if there is none",
+                    "items": {
+                        "type": "number",
+                    },
+                },
+                "brightness": {
+                    "type": "string",
+                    "description": "How bright is the image",
+                    "enum": Brightness::VARIANTS
+                },
+
+                "what_worked_well": {
+                    "type": "string",
+                    "description": "What worked well in the image, be concise"
+                },
+                "what_didnt_work": {
+                    "type": "string",
+                     "description": "What did not work well in the image, be concise"
+                },
+                "differences_from_prompt": {
+                    "type": "string",
+                    "description": "What was different about the image from the input prompt, describe in detail, be concise, leave blank if the image was accurate to the prompt"
+                },
+                "how_to_improve": {
+                    "type": "string",
+                    "description": "How could future prompts be written in a way that recognises the diffusion models weaknesses in following prompts, be concise, be general not specific to this image to apply to future prompts for new images, leave blank if the image was accurate to the prompt"
+                },
+
+                "time_of_day": {
+                    "type": "string",
+                    "description": "The time of day for the image",
+                    "enum": TimeOfDay::VARIANTS
+                },
+                "season": {
+                    "type": "string",
+                    "description": "The season for the image",
+                    "enum": Season::VARIANTS
+                },
+                "weather": {
+                    "type": "array",
+                     "description": "The weather for the image, max 3",
+                     "items": {
+                         "type": "string",
+                         "enum": Weather::VARIANTS
+                     }
+                 },
+
+                "tags": {
+                    "type": "array",
+                    "description":  "The tags for the image, max 6, titlecase",
+                    "items": {
+                        "type": "string",
+                    }
+                },
+                "image_mood": {
+                    "type": "array",
+                     "description": "The moods for the image, max 3",
+                     "items": {
+                         "type": "string",
+                         "enum": ImageMood::VARIANTS
+                     }
+                 },
+                 "color_palette": {
+                     "type": "array",
+                     "description": "The color palette for the image, max 3",
+                     "items": {
+                         "type": "string",
+                         "enum": ColorPalette::VARIANTS
+                     }
+                 },
+                 "subject_matter": {
+                     "type": "array",
+                     "description":   "The subject matter for the image, max 3",
+                     "items": {
+                         "type": "string",
+                         "enum": SubjectMatter::VARIANTS
+                     }
+                 },
+              },
+              "required": ["primary_color", "primary_color_rgb", "secondary_color", "secondary_color_rgb", "tertiary_color", "tertiary_color_rgb", "brightness", "what_worked_well", "what_didnt_work", "differences_from_prompt", "how_to_improve", "time_of_day", "season", "weather", "tags", "image_mood", "color_palette", "subject_matter"],
+              "additionalProperties": false
+            },
+            "strict": true
+          }
+        },
+        "max_tokens": 4096
+    });
+
+    let response = client
+        .post("https://api.openai.com/v1/chat/completions")
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {api_key}"))
+        .json(&request_body)
+        .send()
+        .await?;
+    let response_json: Value = response.json().await?;
+    let json_response = response_json["choices"]
+        .get(0)
+        .and_then(|choice| choice["message"]["content"].as_str())
+        .map_or_else(
+            || Err(anyhow!("No content found in response {}", response_json)),
+            |content| Ok(content.to_string()),
+        )?;
+
+    let parsed_response: VisionData = serde_json::from_str(&json_response)?;
+
+    // Log token usage
+    let prompt_tokens = response_json["usage"]["prompt_tokens"].as_u64().unwrap();
+    let completition_tokens = response_json["usage"]["completion_tokens"]
+        .as_u64()
+        .unwrap();
+    let (prompt_ppm, completition_ppm) = (0.15, 0.6);
+    let (prompt_cost, completition_cost) = (
+        (prompt_ppm / 1_000_000.0) * prompt_tokens as f32,
+        (completition_ppm / 1_000_000.0) * completition_tokens as f32,
+    );
+    let total_cost = prompt_cost + completition_cost;
+    log::info!(
+        "Visioned image using {} prompt tokens and {} completition tokens at ${}",
+        prompt_tokens,
+        completition_tokens,
+        total_cost,
+    );
+
+    Ok(parsed_response)
 }

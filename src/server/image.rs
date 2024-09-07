@@ -1,12 +1,13 @@
 use crate::common::{
-    GetWallpapersResponse, ImageFile, LikedState, TokenStringPacket, TokenUuidLikedPacket,
-    TokenUuidPacket, WallpaperData,
+    ColorData, GetWallpapersResponse, ImageFile, LikedState, PromptData, TokenStringPacket,
+    TokenUuidLikedPacket, TokenUuidPacket, WallpaperData,
 };
-use crate::server::{auth::verify_token, prompt, read_database, write_database};
+use crate::server::{auth::verify_token, gpt, read_database, write_database};
 use anyhow::{anyhow, Result};
 use axum::http::{HeaderMap, HeaderValue};
 use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, ImageReader, Pixel};
 use rand::seq::SliceRandom;
@@ -37,7 +38,16 @@ pub async fn generate(packet: Bytes) -> impl IntoResponse {
         return StatusCode::UNAUTHORIZED;
     }
 
-    match generate_wallpaper_impl(None, Some(packet.string)).await {
+    match generate_wallpaper_impl(
+        None,
+        if packet.string.is_empty() {
+            None
+        } else {
+            Some(packet.string)
+        },
+    )
+    .await
+    {
         Ok(()) => StatusCode::OK,
         Err(e) => {
             log::error!("Failed to generate wallpaper: {:?}", e);
@@ -250,7 +260,7 @@ pub async fn recreate(packet: Bytes) -> impl IntoResponse {
     }
 
     // Get the prompt
-    let result: Result<(String, String)> = async {
+    let result: Result<PromptData> = async {
         let database = read_database().await?;
         let (_, wallpaper) = database
             .wallpapers
@@ -258,13 +268,13 @@ pub async fn recreate(packet: Bytes) -> impl IntoResponse {
             .find(|(id, _)| **id == packet.uuid)
             .ok_or_else(|| anyhow::anyhow!("Image not found"))?;
 
-        Ok((wallpaper.prompt.clone(), wallpaper.prompt_short.clone()))
+        Ok(wallpaper.prompt_data.clone())
     }
     .await;
 
     match result {
-        Ok((prompt, prompt_short)) => {
-            if (generate_wallpaper_impl(Some((prompt, prompt_short)), None).await).is_err() {
+        Ok(prompt_data) => {
+            if (generate_wallpaper_impl(Some(prompt_data), None).await).is_err() {
                 log::error!("Failed to recreate image");
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
             }
@@ -278,7 +288,7 @@ pub async fn recreate(packet: Bytes) -> impl IntoResponse {
 }
 
 pub async fn generate_wallpaper_impl(
-    prompt: Option<(String, String)>,
+    prompt_data: Option<PromptData>,
     message: Option<String>,
 ) -> Result<()> {
     log::info!("Generating wallpaper");
@@ -289,11 +299,11 @@ pub async fn generate_wallpaper_impl(
     let datetime_text = datetime.format(&format)?;
 
     // Generate image prompt
-    let (prompt, prompt_short) = if let Some((p1, p2)) = prompt {
-        (p1, p2)
+    let prompt_data = if let Some(prompt_data) = prompt_data {
+        prompt_data
     } else {
-        let new = prompt::generate(message).await?;
-        log::info!("Generated prompt: {}", new.0);
+        let new = gpt::generate(message).await?;
+        log::info!("Generated prompt: {}", new.prompt);
         new
     };
 
@@ -301,7 +311,7 @@ pub async fn generate_wallpaper_impl(
     let client = Client::new();
     let api_token =
         env::var("REPLICATE_API_TOKEN").expect("REPLICATE_API_TOKEN environment variable not set");
-    let (image_url, image) = image_diffusion(&client, &api_token, &prompt).await?;
+    let (image_url, image) = image_diffusion(&client, &api_token, &prompt_data.prompt).await?;
     log::info!("Generated image: {}", &image_url);
 
     // Resize the image to thumbnail
@@ -346,7 +356,12 @@ pub async fn generate_wallpaper_impl(
     };
 
     // Calculate average color and brightness
-    let (average_color, brightness) = calculate_average_color_and_brightness(&thumb_image);
+    let color_data = calculate_color_data(&thumb_image);
+
+    // Get vision data
+    log::info!("Sending image result to gpt to classify");
+    let vision_data = gpt::vision_image(image, &prompt_data.prompt).await?;
+    log::info!("Received image classification from gpt");
 
     let wallpaper = WallpaperData {
         id,
@@ -354,13 +369,13 @@ pub async fn generate_wallpaper_impl(
         datetime,
         datetime_text,
 
-        prompt,
-        prompt_short,
+        prompt_data,
+        vision_data,
+
         original_file,
         upscaled_file: None,
 
-        average_color,
-        brightness,
+        color_data,
 
         thumbnail_file,
         thumbhash,
@@ -388,10 +403,15 @@ pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper: WallpaperData) -> Resul
     let image = image::open(&image_path)?;
 
     // Upscale the image using the high quality upscaler
-    let (upscaled_url, upscaled_image) =
-        upscale_image(&client, &api_token, &image, &wallpaper.prompt).await?;
+    let (upscaled_url, upscaled_image) = upscale_image(
+        &client,
+        &api_token,
+        &image,
+        &wallpaper.prompt_data.shortened_prompt,
+    )
+    .await?;
     log::info!("Upscaled image: {}", &upscaled_url);
-    let upscaled_image = upscaled_image.resize_to_fill(3840, 2160, FilterType::Lanczos3);
+    let upscaled_image = upscaled_image.resize_to_fill(1920, 1080, FilterType::Lanczos3);
 
     // Save to file
     let dir = Path::new("wallpapers");
@@ -428,12 +448,11 @@ pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper: WallpaperData) -> Resul
     };
 
     // Calculate average color and brightness
-    let (average_color, brightness) = calculate_average_color_and_brightness(&thumb_image);
+    let color_data = calculate_color_data(&thumb_image);
 
     let wallpaper = WallpaperData {
         upscaled_file,
-        average_color,
-        brightness,
+        color_data,
         thumbnail_file,
         ..wallpaper
     };
@@ -446,31 +465,87 @@ pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper: WallpaperData) -> Resul
     Ok(())
 }
 
-fn calculate_average_color_and_brightness(img: &DynamicImage) -> ((u8, u8, u8), u8) {
+fn calculate_color_data(img: &DynamicImage) -> ColorData {
     let (width, height) = img.dimensions();
     let total_pixels = (width * height) as f32;
 
-    // Sum up all the RGB values
-    let (sum_r, sum_g, sum_b) = img.pixels().fold(
-        (0u64, 0u64, 0u64),
-        |(acc_r, acc_g, acc_b), (_, _, pixel)| {
+    // Sum up all the RGB values and brightness
+    let (sum_r, sum_g, sum_b, mut brightness_values) = img.pixels().fold(
+        (0.0, 0.0, 0.0, Vec::new()),
+        |(acc_r, acc_g, acc_b, mut brightness_values), (_, _, pixel)| {
             let [r, g, b] = pixel.to_rgb().0;
-            (
-                acc_r + u64::from(r),
-                acc_g + u64::from(g),
-                acc_b + u64::from(b),
-            )
+            let (r, g, b) = (
+                f32::from(r) / 255.0,
+                f32::from(g) / 255.0,
+                f32::from(b) / 255.0,
+            );
+            let brightness = 0.114f32.mul_add(b, 0.299f32.mul_add(r, 0.587f32 * g));
+            brightness_values.push(brightness);
+            (acc_r + r, acc_g + g, acc_b + b, brightness_values)
         },
     );
 
-    let avg_r = sum_r as f32 / total_pixels;
-    let avg_g = sum_g as f32 / total_pixels;
-    let avg_b = sum_b as f32 / total_pixels;
+    let avg_r = sum_r / total_pixels;
+    let avg_g = sum_g / total_pixels;
+    let avg_b = sum_b / total_pixels;
 
-    // Use the weighted sum formula for perceived brightness
-    let brightness = 0.299f32.mul_add(avg_r, 0.587f32.mul_add(avg_g, 0.114 * avg_b)) as u8;
+    let (hue, saturation, lightness) = rgb_to_hsl(avg_r, avg_g, avg_b);
+    let chroma = calculate_chroma_hsl(lightness, saturation);
 
-    ((avg_r as u8, avg_g as u8, avg_b as u8), brightness)
+    // Compute brightness percentiles
+    brightness_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let top_20_percent_brightness =
+        brightness_values[(brightness_values.len() as f32 * 0.80).ceil() as usize - 1];
+    let bottom_20_percent_brightness =
+        brightness_values[(brightness_values.len() as f32 * 0.20).floor() as usize];
+
+    // Calculate contrast ratio
+    let contrast_ratio = (top_20_percent_brightness + 0.05) / (bottom_20_percent_brightness + 0.05);
+
+    ColorData {
+        average_color: (avg_r, avg_b, avg_g),
+        hue,
+        saturation,
+        lightness,
+        chroma,
+        top_20_percent_brightness,
+        bottom_20_percent_brightness,
+        contrast_ratio,
+    }
+}
+
+/// Convert RGB to HSL, each value is in the range [0,1]
+fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let lightness = (max + min) / 2.0;
+
+    let mut hue = 0.0;
+    let mut saturation = 0.0;
+    if (max - min).abs() > f32::EPSILON {
+        let d = max - min;
+        saturation = if lightness > 0.5 {
+            d / (2.0 - d)
+        } else {
+            d / (max + min)
+        };
+
+        if (max - r).abs() > f32::EPSILON {
+            hue = (g - b) / d + if g < b { 6.0 } else { 0.0 };
+        } else if (max - g).abs() > f32::EPSILON {
+            hue = (b - r) / d + 2.0;
+        } else {
+            hue = (r - g) / d + 4.0;
+        }
+        hue /= 6.0;
+    }
+
+    (hue, saturation, lightness)
+}
+
+/// Calculate chroma (perceived intensity of color) from hue and saturation in HSL.
+fn calculate_chroma_hsl(lightness: f32, saturation: f32) -> f32 {
+    (1.0 - 2.0f32.mul_add(lightness, -1.0).abs()) * saturation
 }
 
 async fn remove_wallpaper_impl(packet: TokenUuidPacket) -> Result<()> {
@@ -546,11 +621,9 @@ async fn upscale_image(
 ) -> Result<(String, DynamicImage)> {
     let image = image.resize(960, 640, FilterType::Lanczos3);
     let mut bytes = Vec::new();
-    image.write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)?;
-    let image_uri = format!(
-        "data:application/octet-stream;base64,{}",
-        STANDARD.encode(&bytes)
-    );
+    let encoder = JpegEncoder::new_with_quality(&mut bytes, 90);
+    image.write_with_encoder(encoder)?;
+    let image_uri = format!("data:image/jpeg;base64,{}", STANDARD.encode(&bytes));
 
     let result_url = replicate_request_prediction(
         client,
@@ -569,7 +642,7 @@ async fn upscale_image(
                 "scheduler": "DPM++ 3M SDE Karras",
                 "creativity": 0.35,
                 "resemblance": 0.6,
-                "scale_factor": 3,
+                "scale_factor": 2,
                 "output_format": "png",
                 "num_inference_steps": 18,
             }

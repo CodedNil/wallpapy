@@ -13,7 +13,7 @@ pub fn login(
 ) {
     ehttp::fetch(
         ehttp::Request::post(
-            &format!("http://{host}/login"),
+            format!("http://{host}/login"),
             bincode::serialize(&LoginPacket {
                 username: username.to_string(),
                 password: password.to_string(),
@@ -48,7 +48,7 @@ pub fn generate_wallpaper(
 ) {
     ehttp::fetch(
         ehttp::Request::post(
-            &format!("http://{host}/generate"),
+            format!("http://{host}/generate"),
             bincode::serialize(&TokenStringPacket {
                 token: token.to_string(),
                 string: message.to_string(),
@@ -66,7 +66,7 @@ pub fn get_gallery(
     on_done: impl 'static + Send + FnOnce(Result<GetWallpapersResponse>),
 ) {
     ehttp::fetch(
-        ehttp::Request::get(&format!("http://{host}/get")),
+        ehttp::Request::get(format!("http://{host}/get")),
         Box::new(move |res: std::result::Result<ehttp::Response, String>| {
             on_done(match res {
                 Ok(res) => {
@@ -94,7 +94,7 @@ pub fn add_comment(
 ) {
     ehttp::fetch(
         ehttp::Request::post(
-            &format!("http://{host}/commentadd"),
+            format!("http://{host}/commentadd"),
             bincode::serialize(&TokenStringPacket {
                 token: token.to_string(),
                 string: comment.to_string(),
@@ -115,7 +115,7 @@ pub fn remove_comment(
 ) {
     ehttp::fetch(
         ehttp::Request::post(
-            &format!("http://{host}/commentremove"),
+            format!("http://{host}/commentremove"),
             bincode::serialize(&TokenUuidPacket {
                 token: token.to_string(),
                 uuid: *comment_id,
@@ -137,7 +137,7 @@ pub fn like_image(
 ) {
     ehttp::fetch(
         ehttp::Request::post(
-            &format!("http://{host}/imageliked"),
+            format!("http://{host}/imageliked"),
             bincode::serialize(&TokenUuidLikedPacket {
                 token: token.to_string(),
                 uuid: *image_id,
@@ -159,7 +159,7 @@ pub fn remove_image(
 ) {
     ehttp::fetch(
         ehttp::Request::post(
-            &format!("http://{host}/imageremove"),
+            format!("http://{host}/imageremove"),
             bincode::serialize(&TokenUuidPacket {
                 token: token.to_string(),
                 uuid: *image_id,
@@ -180,7 +180,7 @@ pub fn recreate_image(
 ) {
     ehttp::fetch(
         ehttp::Request::post(
-            &format!("http://{host}/imagerecreate"),
+            format!("http://{host}/imagerecreate"),
             bincode::serialize(&TokenUuidPacket {
                 token: token.to_string(),
                 uuid: *image_id,

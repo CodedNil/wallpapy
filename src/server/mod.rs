@@ -10,8 +10,8 @@ use uuid::Uuid;
 
 mod auth;
 mod commenting;
+mod gpt;
 mod image;
-mod prompt;
 pub mod routing;
 
 const DATABASE_FILE: &str = "database.ron";

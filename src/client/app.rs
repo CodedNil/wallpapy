@@ -3,7 +3,10 @@ use crate::{
         add_comment, generate_wallpaper, get_gallery, like_image, login, recreate_image,
         remove_comment, remove_image,
     },
-    common::{CommentData, DatabaseObjectType, GetWallpapersResponse, LikedState, WallpaperData},
+    common::{
+        utils::vec_str, Brightness, CommentData, DatabaseObjectType, GetWallpapersResponse,
+        LikedState, WallpaperData,
+    },
     PORT,
 };
 use anyhow::Result;
@@ -184,9 +187,138 @@ impl Wallpapy {
                     .show_loading_spinner(false)
                     .rounding(16.0)
                     .ui(ui);
-                    ui.label(
-                        RichText::new(wallpaper.prompt.clone()).font(FontId::proportional(20.0)),
-                    )
+
+                    let font_id = FontId::proportional(20.0);
+                    if ui
+                        .button(
+                            RichText::new(wallpaper.prompt_data.prompt.clone())
+                                .font(font_id.clone()),
+                        )
+                        .clicked()
+                    {
+                        ui.output_mut(|o: &mut egui::PlatformOutput| {
+                            o.copied_text.clone_from(&wallpaper.prompt_data.prompt);
+                            self.toasts.lock().info("Prompt copied to clipboard");
+                        });
+                    }
+                    let vision = &wallpaper.vision_data;
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(vision.primary_color.clone())
+                                .font(font_id.clone())
+                                .background_color(slice_to_color32(vision.primary_color_rgb))
+                                .color(Color32::WHITE)
+                                .strong(),
+                        );
+                        ui.label(
+                            RichText::new(vision.secondary_color.clone())
+                                .font(font_id.clone())
+                                .background_color(slice_to_color32(vision.secondary_color_rgb))
+                                .color(Color32::WHITE)
+                                .strong(),
+                        );
+                        ui.label(
+                            RichText::new(vision.tertiary_color.clone())
+                                .font(font_id.clone())
+                                .background_color(slice_to_color32(vision.tertiary_color_rgb))
+                                .color(Color32::WHITE)
+                                .strong(),
+                        );
+                        ui.label(
+                            RichText::new(vision.brightness.to_string())
+                                .font(font_id.clone())
+                                .background_color(match vision.brightness {
+                                    Brightness::Dark => Color32::from_gray(0),
+                                    Brightness::Dim => Color32::from_gray(50),
+                                    Brightness::Normal => Color32::from_gray(100),
+                                    Brightness::Bright => Color32::from_gray(150),
+                                    Brightness::Light => Color32::from_gray(200),
+                                })
+                                .color(Color32::WHITE)
+                                .strong(),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "{} {} {}",
+                                vision.time_of_day,
+                                vision.season,
+                                vec_str(&vision.weather)
+                            ))
+                            .font(font_id.clone())
+                            .background_color(Color32::DARK_GRAY)
+                            .color(Color32::WHITE)
+                            .strong(),
+                        );
+                        ui.label(
+                            RichText::new(vec_str(&vision.color_palette))
+                                .font(font_id.clone())
+                                .background_color(Color32::DARK_GRAY)
+                                .color(Color32::WHITE)
+                                .strong(),
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(format!("Mood: {}", vec_str(&vision.image_mood)))
+                                .font(font_id.clone())
+                                .background_color(Color32::DARK_GRAY)
+                                .color(Color32::WHITE)
+                                .strong(),
+                        );
+                        ui.label(
+                            RichText::new(format!("Tags: {}", vec_str(&vision.tags)))
+                                .font(font_id.clone())
+                                .background_color(Color32::DARK_GRAY)
+                                .color(Color32::WHITE)
+                                .strong(),
+                        );
+                        ui.label(
+                            RichText::new(format!("Subject: {}", vec_str(&vision.subject_matter)))
+                                .font(font_id.clone())
+                                .background_color(Color32::DARK_GRAY)
+                                .color(Color32::WHITE)
+                                .strong(),
+                        );
+                    });
+                    if !vision.what_worked_well.is_empty() {
+                        ui.label(
+                            RichText::new(format!("What Worked: {}", &vision.what_worked_well))
+                                .font(font_id.clone())
+                                .background_color(Color32::DARK_GREEN)
+                                .color(Color32::WHITE)
+                                .strong(),
+                        );
+                    }
+                    if !vision.what_didnt_work.is_empty() {
+                        ui.label(
+                            RichText::new(format!("What Didn't Work: {}", &vision.what_didnt_work))
+                                .font(font_id.clone())
+                                .background_color(Color32::DARK_RED)
+                                .color(Color32::WHITE)
+                                .strong(),
+                        );
+                    }
+                    if !vision.differences_from_prompt.is_empty() {
+                        ui.label(
+                            RichText::new(format!(
+                                "Differences From Prompt: {}",
+                                &vision.differences_from_prompt
+                            ))
+                            .font(font_id.clone())
+                            .background_color(Color32::DARK_GRAY)
+                            .color(Color32::WHITE)
+                            .strong(),
+                        );
+                    }
+                    if !vision.how_to_improve.is_empty() {
+                        ui.label(
+                            RichText::new(format!("How To Improve: {}", &vision.how_to_improve))
+                                .font(font_id.clone())
+                                .background_color(Color32::DARK_GRAY)
+                                .color(Color32::WHITE)
+                                .strong(),
+                        );
+                    }
                 });
 
                 // Handle left and right arrow key press
@@ -329,9 +461,16 @@ impl Wallpapy {
         ));
         painter.galley(datetime_rect.min, datetime_galley, Color32::WHITE);
 
-        // Draw average brightness and color below date
+        // Draw average brightness and color
         let colorinfo_galley = painter.layout_no_wrap(
-            format!("{:.0}%", f32::from(wallpaper.brightness) / 255.0 * 100.0,),
+            format!(
+                "{:.0}% {:.0}% {:.0}%   {:.0}% {:.0}%",
+                wallpaper.color_data.top_20_percent_brightness * 100.0,
+                wallpaper.color_data.lightness * 100.0,
+                wallpaper.color_data.bottom_20_percent_brightness * 100.0,
+                wallpaper.color_data.saturation * 100.0,
+                wallpaper.color_data.chroma * 100.0,
+            ),
             FontId::proportional(ui_scale),
             Color32::WHITE,
         );
@@ -343,9 +482,9 @@ impl Wallpapy {
             colorinfo_rect.expand(ui_scale * 0.5),
             ui_scale,
             Color32::from_rgb(
-                wallpaper.average_color.0,
-                wallpaper.average_color.1,
-                wallpaper.average_color.2,
+                (wallpaper.color_data.average_color.0 * 255.0).round() as u8,
+                (wallpaper.color_data.average_color.1 * 255.0).round() as u8,
+                (wallpaper.color_data.average_color.2 * 255.0).round() as u8,
             ),
         ));
         painter.galley(colorinfo_rect.min, colorinfo_galley, Color32::WHITE);
@@ -536,9 +675,9 @@ impl Wallpapy {
             }
         }
 
-        // Draw shortened prompt in bottom center
+        // Draw shortened prompt in bottom center, click to copy to clipboard
         let prompt_galley = painter.layout(
-            wallpaper.prompt_short.clone(),
+            wallpaper.prompt_data.shortened_prompt.clone(),
             FontId::proportional(ui_scale),
             Color32::WHITE.gamma_multiply(0.8),
             width - 40.0,
@@ -547,6 +686,7 @@ impl Wallpapy {
             image_rect.center_bottom() + vec2(0.0, -20.0),
             prompt_galley.size(),
         );
+        let is_hovering = ui.rect_contains_pointer(prompt_rect);
         painter.add(Shape::rect_filled(
             prompt_rect.expand(ui_scale * 0.5625),
             ui_scale,
@@ -556,9 +696,20 @@ impl Wallpapy {
                 LikedState::Disliked => Color32::from_rgb(100, 20, 20),
                 LikedState::None => Color32::BLACK,
             }
-            .gamma_multiply(0.9),
+            .gamma_multiply(if is_hovering { 1.0 } else { 0.9 }),
         ));
         painter.galley(prompt_rect.min, prompt_galley, Color32::WHITE);
+        if is_hovering {
+            sub_button_hovered = true;
+            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+            if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
+                ui.output_mut(|o: &mut egui::PlatformOutput| {
+                    o.copied_text
+                        .clone_from(&wallpaper.prompt_data.shortened_prompt);
+                    self.toasts.lock().info("Prompt copied to clipboard");
+                });
+            }
+        }
 
         // Check if image is clicked
         let is_hovering = ui.rect_contains_pointer(image_rect);
@@ -630,7 +781,7 @@ impl Wallpapy {
             }
         }
 
-        // Draw comments text in bottom center
+        // Draw comments text in bottom center, click to copy to clipboard
         let text_galley = painter.layout(
             comment.comment.clone(),
             FontId::proportional(ui_scale),
@@ -639,12 +790,22 @@ impl Wallpapy {
         );
         let text_rect = egui::Align2::CENTER_BOTTOM
             .anchor_size(rect.center_bottom() + vec2(0.0, -20.0), text_galley.size());
+        let is_hovering = ui.rect_contains_pointer(text_rect);
         painter.add(Shape::rect_filled(
             text_rect.expand(ui_scale * 0.5),
             ui_scale,
             Color32::BLACK.gamma_multiply(0.8),
         ));
         painter.galley(text_rect.min, text_galley, Color32::WHITE);
+        if is_hovering {
+            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+            if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
+                ui.output_mut(|o: &mut egui::PlatformOutput| {
+                    o.copied_text.clone_from(&comment.comment);
+                    self.toasts.lock().info("Comment copied to clipboard");
+                });
+            }
+        }
     }
 
     fn get_gallery(&mut self, ctx: &Context) {
@@ -776,4 +937,8 @@ fn button_pressed_result(
                 .error(format!("Failed to submit request: {e}"));
         }
     }
+}
+
+const fn slice_to_color32(rgb: [u8; 3]) -> Color32 {
+    Color32::from_rgb(rgb[0], rgb[1], rgb[2])
 }
