@@ -403,15 +403,10 @@ pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper: WallpaperData) -> Resul
     let image = image::open(&image_path)?;
 
     // Upscale the image using the high quality upscaler
-    let (upscaled_url, upscaled_image) = upscale_image(
-        &client,
-        &api_token,
-        &image,
-        &wallpaper.prompt_data.shortened_prompt,
-    )
-    .await?;
+    let (upscaled_url, upscaled_image) =
+        upscale_image(&client, &api_token, &image, &wallpaper.prompt_data.prompt).await?;
     log::info!("Upscaled image: {}", &upscaled_url);
-    let upscaled_image = upscaled_image.resize_to_fill(1920, 1080, FilterType::Lanczos3);
+    let upscaled_image = upscaled_image.resize_to_fill(2560, 1440, FilterType::Lanczos3);
 
     // Save to file
     let dir = Path::new("wallpapers");
@@ -619,7 +614,6 @@ async fn upscale_image(
     image: &DynamicImage,
     prompt: &str,
 ) -> Result<(String, DynamicImage)> {
-    let image = image.resize(960, 640, FilterType::Lanczos3);
     let mut bytes = Vec::new();
     let encoder = JpegEncoder::new_with_quality(&mut bytes, 90);
     image.write_with_encoder(encoder)?;

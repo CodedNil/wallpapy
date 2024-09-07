@@ -191,6 +191,31 @@ impl Wallpapy {
                     let font_id = FontId::proportional(20.0);
                     if ui
                         .button(
+                            RichText::new(wallpaper.prompt_data.style.clone())
+                                .font(font_id.clone()),
+                        )
+                        .clicked()
+                    {
+                        ui.output_mut(|o: &mut egui::PlatformOutput| {
+                            o.copied_text.clone_from(&wallpaper.prompt_data.style);
+                            self.toasts.lock().info("Style copied to clipboard");
+                        });
+                    }
+                    if ui
+                        .button(
+                            RichText::new(wallpaper.prompt_data.shortened_prompt.clone())
+                                .font(font_id.clone()),
+                        )
+                        .clicked()
+                    {
+                        ui.output_mut(|o: &mut egui::PlatformOutput| {
+                            o.copied_text
+                                .clone_from(&wallpaper.prompt_data.shortened_prompt);
+                            self.toasts.lock().info("Text copied to clipboard");
+                        });
+                    }
+                    if ui
+                        .button(
                             RichText::new(wallpaper.prompt_data.prompt.clone())
                                 .font(font_id.clone()),
                         )
@@ -203,27 +228,15 @@ impl Wallpapy {
                     }
                     let vision = &wallpaper.vision_data;
                     ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(vision.primary_color.clone())
-                                .font(font_id.clone())
-                                .background_color(slice_to_color32(vision.primary_color_rgb))
-                                .color(Color32::WHITE)
-                                .strong(),
-                        );
-                        ui.label(
-                            RichText::new(vision.secondary_color.clone())
-                                .font(font_id.clone())
-                                .background_color(slice_to_color32(vision.secondary_color_rgb))
-                                .color(Color32::WHITE)
-                                .strong(),
-                        );
-                        ui.label(
-                            RichText::new(vision.tertiary_color.clone())
-                                .font(font_id.clone())
-                                .background_color(slice_to_color32(vision.tertiary_color_rgb))
-                                .color(Color32::WHITE)
-                                .strong(),
-                        );
+                        for color in &vision.key_colors {
+                            ui.label(
+                                RichText::new(color.name.clone())
+                                    .font(font_id.clone())
+                                    .background_color(slice_to_color32(color.rgb_values))
+                                    .color(Color32::WHITE)
+                                    .strong(),
+                            );
+                        }
                         ui.label(
                             RichText::new(vision.brightness.to_string())
                                 .font(font_id.clone())
@@ -238,16 +251,11 @@ impl Wallpapy {
                                 .strong(),
                         );
                         ui.label(
-                            RichText::new(format!(
-                                "{} {} {}",
-                                vision.time_of_day,
-                                vision.season,
-                                vec_str(&vision.weather)
-                            ))
-                            .font(font_id.clone())
-                            .background_color(Color32::DARK_GRAY)
-                            .color(Color32::WHITE)
-                            .strong(),
+                            RichText::new(format!("{} {}", vision.time_of_day, vision.season,))
+                                .font(font_id.clone())
+                                .background_color(Color32::DARK_GRAY)
+                                .color(Color32::WHITE)
+                                .strong(),
                         );
                         ui.label(
                             RichText::new(vec_str(&vision.color_palette))
@@ -280,45 +288,6 @@ impl Wallpapy {
                                 .strong(),
                         );
                     });
-                    if !vision.what_worked_well.is_empty() {
-                        ui.label(
-                            RichText::new(format!("What Worked: {}", &vision.what_worked_well))
-                                .font(font_id.clone())
-                                .background_color(Color32::DARK_GREEN)
-                                .color(Color32::WHITE)
-                                .strong(),
-                        );
-                    }
-                    if !vision.what_didnt_work.is_empty() {
-                        ui.label(
-                            RichText::new(format!("What Didn't Work: {}", &vision.what_didnt_work))
-                                .font(font_id.clone())
-                                .background_color(Color32::DARK_RED)
-                                .color(Color32::WHITE)
-                                .strong(),
-                        );
-                    }
-                    if !vision.differences_from_prompt.is_empty() {
-                        ui.label(
-                            RichText::new(format!(
-                                "Differences From Prompt: {}",
-                                &vision.differences_from_prompt
-                            ))
-                            .font(font_id.clone())
-                            .background_color(Color32::DARK_GRAY)
-                            .color(Color32::WHITE)
-                            .strong(),
-                        );
-                    }
-                    if !vision.how_to_improve.is_empty() {
-                        ui.label(
-                            RichText::new(format!("How To Improve: {}", &vision.how_to_improve))
-                                .font(font_id.clone())
-                                .background_color(Color32::DARK_GRAY)
-                                .color(Color32::WHITE)
-                                .strong(),
-                        );
-                    }
                 });
 
                 // Handle left and right arrow key press
@@ -460,34 +429,6 @@ impl Wallpapy {
             Color32::BLACK.gamma_multiply(0.8),
         ));
         painter.galley(datetime_rect.min, datetime_galley, Color32::WHITE);
-
-        // Draw average brightness and color
-        let colorinfo_galley = painter.layout_no_wrap(
-            format!(
-                "{:.0}% {:.0}% {:.0}%   {:.0}% {:.0}%",
-                wallpaper.color_data.top_20_percent_brightness * 100.0,
-                wallpaper.color_data.lightness * 100.0,
-                wallpaper.color_data.bottom_20_percent_brightness * 100.0,
-                wallpaper.color_data.saturation * 100.0,
-                wallpaper.color_data.chroma * 100.0,
-            ),
-            FontId::proportional(ui_scale),
-            Color32::WHITE,
-        );
-        let colorinfo_rect = egui::Align2::LEFT_TOP.anchor_size(
-            datetime_rect.left_bottom() + vec2(0.0, 15.0),
-            colorinfo_galley.size(),
-        );
-        painter.add(Shape::rect_filled(
-            colorinfo_rect.expand(ui_scale * 0.5),
-            ui_scale,
-            Color32::from_rgb(
-                (wallpaper.color_data.average_color.0 * 255.0).round() as u8,
-                (wallpaper.color_data.average_color.1 * 255.0).round() as u8,
-                (wallpaper.color_data.average_color.2 * 255.0).round() as u8,
-            ),
-        ));
-        painter.galley(colorinfo_rect.min, colorinfo_galley, Color32::WHITE);
 
         // Add delete button in top-right corner
         let delete_button_size = vec2(ui_scale.mul_add(2.0, 2.0), ui_scale.mul_add(2.0, 2.0));
@@ -706,7 +647,7 @@ impl Wallpapy {
                 ui.output_mut(|o: &mut egui::PlatformOutput| {
                     o.copied_text
                         .clone_from(&wallpaper.prompt_data.shortened_prompt);
-                    self.toasts.lock().info("Prompt copied to clipboard");
+                    self.toasts.lock().info("Text copied to clipboard");
                 });
             }
         }

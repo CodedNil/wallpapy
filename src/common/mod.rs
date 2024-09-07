@@ -45,11 +45,9 @@ pub struct ImageFile {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PromptData {
+    pub style: String,
     pub prompt: String,
     pub shortened_prompt: String,
-    pub style: String,
-
-    pub tags: Vec<String>,
 
     pub time_of_day: TimeOfDay,
     pub season: Season,
@@ -57,26 +55,14 @@ pub struct PromptData {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct VisionData {
-    pub primary_color: String,
-    pub primary_color_rgb: [u8; 3],
-    pub secondary_color: String,
-    pub secondary_color_rgb: [u8; 3],
-    pub tertiary_color: String,
-    pub tertiary_color_rgb: [u8; 3],
-    pub brightness: Brightness,
-
-    pub what_worked_well: String,
-    pub what_didnt_work: String,
-    pub differences_from_prompt: String,
-    pub how_to_improve: String,
-
     pub time_of_day: TimeOfDay,
     pub season: Season,
-    pub weather: Vec<Weather>,
 
     pub tags: Vec<String>,
     pub image_mood: Vec<ImageMood>,
+    pub brightness: Brightness,
     pub color_palette: Vec<ColorPalette>,
+    pub key_colors: Vec<Color>,
     pub subject_matter: Vec<SubjectMatter>,
 }
 
@@ -90,6 +76,12 @@ pub struct ColorData {
     pub top_20_percent_brightness: f32,
     pub bottom_20_percent_brightness: f32,
     pub contrast_ratio: f32,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Color {
+    pub name: String,
+    pub rgb_values: [u8; 3],
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -174,63 +166,13 @@ pub enum ColorPalette {
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, VariantNames, Display)]
 pub enum Season {
-    EarlySpring,
-    MidSpring,
-    LateSpring,
-    EarlySummer,
-    MidSummer,
-    LateSummer,
-    EarlyAutumn,
-    MidAutumn,
-    LateAutumn,
-    EarlyWinter,
-    MidWinter,
-    LateWinter,
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, VariantNames, Display)]
-pub enum Weather {
-    // Clear and Calm
-    Clear,
-
-    // Cloudy and Overcast
-    Overcast,
-    Foggy,
-    Mist,
-
-    // Rain and Storms
-    Drizzle,
-    Rainy,
-    TorrentialRain,
-    Thunderstorm,
-
-    // Winter Weather
-    Snowy,
-    Blizzard,
-    Sleet,
-    Frost,
-
-    // Severe Weather
-    Hail,
-    Hurricane,
-    Tornado,
-    IceStorm,
-    DustStorm,
-    Sandstorm,
-
-    // Wind and Humidity
-    Windy,
-    Humid,
-    Dew,
-
-    // Special Phenomena
-    Rainbow,
-    Aurora,
-    Ethereal,
-    Magical,
-    Lightning,
-    MeteorShower,
+    Spring,
+    Summer,
+    Autumn,
+    Winter,
     Other,
+    Unknown,
+    None,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, VariantNames, Display)]
