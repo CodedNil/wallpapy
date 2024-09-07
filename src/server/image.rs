@@ -436,7 +436,7 @@ pub async fn generate_wallpaper_impl(
 
     // Get vision data
     log::info!("Sending image result to gpt to classify");
-    let vision_data = gpt::vision_image(image, &prompt_data.prompt).await?;
+    let vision_data = gpt::vision_image(image).await?;
     log::info!("Received image classification from gpt");
 
     let wallpaper = WallpaperData {

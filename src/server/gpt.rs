@@ -239,7 +239,7 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
     Ok(parsed_response)
 }
 
-pub async fn vision_image(image: DynamicImage, prompt: &str) -> Result<VisionData> {
+pub async fn vision_image(image: DynamicImage) -> Result<VisionData> {
     let api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not set");
     let client = reqwest::Client::new();
 
@@ -257,7 +257,7 @@ pub async fn vision_image(image: DynamicImage, prompt: &str) -> Result<VisionDat
                 "content": [
                   {
                     "type": "text",
-                    "text": format!("View this image and output data about it in required json schema, the image is a desktop wallpaper image created by a generative diffusion model, based on this prompt: '{prompt}'")
+                    "text": "View this image and output data about it in required json schema'"
                   },
                   {
                     "type": "image_url",
