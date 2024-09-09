@@ -1,9 +1,9 @@
-use crate::server::{auth::login_server, commenting, image, read_database};
+use crate::server::{auth::login_server, commenting, format_duration, image, read_database};
 use axum::{
     routing::{get, post},
     Router,
 };
-use time::{Duration, OffsetDateTime};
+use time::OffsetDateTime;
 
 const NEW_WALLPAPER_INTERVAL: time::Duration = time::Duration::hours(6);
 
@@ -48,27 +48,5 @@ pub async fn start_server() {
 
         // Sleep for 10 minutes
         tokio::time::sleep(tokio::time::Duration::from_secs(60 * 10)).await;
-    }
-}
-
-fn format_duration(duration: Duration) -> String {
-    let total_seconds = duration.whole_seconds();
-    if total_seconds < 60 {
-        return "less than a minute".to_string();
-    }
-
-    let hours = total_seconds / 3600;
-    let minutes = (total_seconds % 3600) / 60;
-
-    match (hours, minutes) {
-        (0, m) => format!("{} minute{}", m, if m == 1 { "" } else { "s" }),
-        (h, 0) => format!("{} hour{}", h, if h == 1 { "" } else { "s" }),
-        (h, m) => format!(
-            "{} hour{} {} minute{}",
-            h,
-            if h == 1 { "" } else { "s" },
-            m,
-            if m == 1 { "" } else { "s" }
-        ),
     }
 }

@@ -2,7 +2,7 @@ use crate::common::{
     Brightness, ColorPalette, DatabaseObjectType, ImageMood, LikedState, PromptData, Season,
     SubjectMatter, TimeOfDay, VisionData,
 };
-use crate::server::{read_database, Database};
+use crate::server::{format_duration, read_database, Database};
 use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use image::codecs::jpeg::JpegEncoder;
@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::env;
 use strum::VariantNames;
-use time::format_description;
+use time::OffsetDateTime;
 
 const PROMPT_GUIDELINES: &str = "A well-crafted FLUX.1 prompt typically includes the following components:
     Subject: The main focus of the image.
@@ -122,10 +122,10 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
         .collect::<Vec<_>>();
     database_history.sort_by_key(|(datetime, _)| *datetime);
 
+    let cur_time = OffsetDateTime::now_utc();
     let mut history_string = Vec::new();
     for (date, data) in database_history {
-        let format = format_description::parse("[day]/[month]/[year] [hour]:[minute]").unwrap();
-        let datetime_text = date.format(&format).unwrap();
+        let datetime_text = format_duration(cur_time - date);
         history_string.push(match data {
             DatabaseObjectType::Wallpaper(wallpaper) => {
                 let liked_state: &str = match wallpaper.liked_state {
@@ -134,28 +134,18 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
                     LikedState::Disliked => " (user disliked this)",
                     LikedState::None => "",
                 };
-                let vision = wallpaper.vision_data;
-                let details = [
-                    format!("{datetime_text} - Wallpaper{liked_state} created"),
-                    format!(
-                        "Image Description: '{}'",
-                        wallpaper.prompt_data.shortened_prompt
-                    ),
-                    format!("Time: {} - Season: {}", vision.time_of_day, vision.season,),
-                ];
-                let filtered_details: Vec<String> = details
-                    .into_iter()
-                    .filter(|s| !s.trim().ends_with(':'))
-                    .collect();
-                filtered_details.join("\n")
+                format!(
+                    "{datetime_text} ago - Wallpaper created{liked_state} '{}'",
+                    wallpaper.prompt_data.shortened_prompt
+                )
             }
             DatabaseObjectType::Comment(comment) => {
                 let comment = comment.comment;
-                format!("{datetime_text}: User commented: '{comment}'")
+                format!("{datetime_text} - User commented: '{comment}'")
             }
         });
     }
-    let history_string = history_string.join("\n\n");
+    let history_string = history_string.join("\n");
 
     let user_message = message.map_or_else(
         || {

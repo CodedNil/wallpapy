@@ -2,6 +2,7 @@ use crate::common::{CommentData, WallpaperData};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use time::Duration;
 use tokio::{
     fs::{self, OpenOptions},
     io::AsyncReadExt,
@@ -44,4 +45,19 @@ async fn write_database(database: &Database) -> Result<()> {
     let data = ron::ser::to_string_pretty(database, pretty)?;
     fs::write(DATABASE_FILE, data).await?;
     Ok(())
+}
+
+fn format_duration(duration: Duration) -> String {
+    let minutes = duration.whole_minutes();
+    let hours = duration.whole_hours();
+    let days = duration.whole_days();
+    let weeks = duration.whole_weeks();
+
+    match (weeks, days, hours, minutes) {
+        (w, _, _, _) if w >= 1 => format!("{} week{}", w, if w == 1 { "" } else { "s" }),
+        (_, d, _, _) if d >= 1 => format!("{} day{}", d, if d == 1 { "" } else { "s" }),
+        (_, _, h, _) if h >= 1 => format!("{} hour{}", h, if h == 1 { "" } else { "s" }),
+        (_, _, _, m) if m >= 1 => format!("{} minute{}", m, if m == 1 { "" } else { "s" }),
+        _ => "less than a minute".to_string(),
+    }
 }
