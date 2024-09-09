@@ -16,7 +16,6 @@ use serde_json::json;
 use std::io::Cursor;
 use std::{env, path::Path, time::Duration};
 use thumbhash::rgba_to_thumb_hash;
-use time::Month;
 use time::{
     format_description::{self, well_known::Rfc3339},
     OffsetDateTime,
@@ -168,22 +167,11 @@ pub async fn favourites() -> impl IntoResponse {
 
 pub async fn smartget() -> impl IntoResponse {
     let now = OffsetDateTime::now_utc();
-    let month = now.month();
     let hour = now.hour();
 
-    let (sunrise_hour, sunset_hour) = match month {
-        Month::January | Month::February | Month::November | Month::December => (8, 16),
-        Month::March | Month::October => (7, 18),
-        Month::April | Month::September => (6, 19),
-        Month::May | Month::August => (5, 20),
-        Month::June | Month::July => (4, 21),
-    };
-
-    let time_of_day = if (hour > sunrise_hour - 1 && hour < sunrise_hour + 1)
-        || hour > sunset_hour - 1 && hour < sunset_hour + 1
-    {
+    let time_of_day = if (hour > 6 && hour < 10) || hour > 19 && hour < 22 {
         TimeOfDay::GoldenHour
-    } else if hour > sunrise_hour && hour < sunset_hour {
+    } else if hour > 8 && hour < 20 {
         TimeOfDay::Day
     } else {
         TimeOfDay::Night
