@@ -5,6 +5,7 @@ use crate::common::{
 use crate::server::{format_duration, read_database, Database};
 use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use chrono::Utc;
 use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
 use image::DynamicImage;
@@ -15,7 +16,6 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::env;
 use strum::VariantNames;
-use time::OffsetDateTime;
 
 const PROMPT_GUIDELINES: &str = "A well-crafted FLUX.1 prompt typically includes the following components:
     Subject: The main focus of the image.
@@ -122,28 +122,36 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
         .collect::<Vec<_>>();
     database_history.sort_by_key(|(datetime, _)| *datetime);
 
-    let cur_time = OffsetDateTime::now_utc();
+    let cur_time = Utc::now();
     let mut history_string = Vec::new();
-    for (date, data) in database_history {
+    for (i, (date, data)) in database_history.iter().take(30).enumerate() {
         let datetime_text = format_duration(cur_time - date);
-        history_string.push(match data {
-            DatabaseObjectType::Wallpaper(wallpaper) => {
-                let liked_state: &str = match wallpaper.liked_state {
-                    LikedState::Loved => " (user LOVED this)",
-                    LikedState::Liked => " (user liked this)",
-                    LikedState::Disliked => " (user disliked this)",
-                    LikedState::None => "",
-                };
+        let (should_add, text) = match data {
+            DatabaseObjectType::Wallpaper(wallpaper) => (
+                i < match wallpaper.liked_state {
+                    LikedState::Loved => 30,
+                    LikedState::Liked | LikedState::Disliked => 15,
+                    LikedState::None => 10,
+                },
                 format!(
-                    "{datetime_text} ago - Wallpaper created{liked_state} '{}'",
+                    "{datetime_text} ago - Wallpaper created{} '{}'",
+                    match wallpaper.liked_state {
+                        LikedState::Loved => " (user LOVED this)",
+                        LikedState::Liked => " (user liked this)",
+                        LikedState::Disliked => " (user disliked this)",
+                        LikedState::None => "",
+                    },
                     wallpaper.prompt_data.shortened_prompt
-                )
-            }
-            DatabaseObjectType::Comment(comment) => {
-                let comment = comment.comment;
-                format!("{datetime_text} - User commented: '{comment}'")
-            }
-        });
+                ),
+            ),
+            DatabaseObjectType::Comment(comment) => (
+                i < 10,
+                format!("{datetime_text} - User commented: '{}'", comment.comment),
+            ),
+        };
+        if should_add {
+            history_string.push(text);
+        }
     }
     let history_string = history_string.join("\n");
 
@@ -162,6 +170,43 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
         |message| format!("'{message}', "),
     );
     let request_body = json!({
+        "model": "gpt-4o-2024-08-06",
+        "messages": [
+            {
+                "role": "system",
+                "name": "history",
+                "content": format!("History of previous prompts and comments:\n{history_string}")
+            },
+            {
+                "role": "system",
+                "content": format!("You are a wallpaper image description generator, describe a wallpaper image in a few sentences without new lines with concise language, prioritise users comments as feedback, aim for variety above all else, every image should be totally refreshing with nothing in common with the previous few, the overall style direction is '{}'", database.key_style)
+            },
+            {
+                "role": "user",
+                "content": format!("Create me a new image prompt, {}Prompt:", user_message)
+            }
+        ],
+        "max_tokens": 4096
+    });
+    let response = client
+        .post("https://api.openai.com/v1/chat/completions")
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {api_key}"))
+        .json(&request_body)
+        .send()
+        .await?;
+    let response_json: Value = response.json().await?;
+    let image_description = response_json["choices"]
+        .get(0)
+        .and_then(|choice| choice["message"]["content"].as_str())
+        .map_or_else(
+            || Err(anyhow!("No content found in response {}", response_json)),
+            |content| Ok(content.to_string()),
+        )?;
+    print_gpt_pricing("Generated description", &response_json);
+
+    // Make another gpt request to write out the full prompt in the correct format
+    let request_body = json!({
         "model": "gpt-4o-mini",
         "messages": [
             {
@@ -171,16 +216,11 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
             },
             {
                 "role": "system",
-                "name": "history",
-                "content": format!("History of previous prompts and comments:\n{history_string}")
-            },
-            {
-                "role": "system",
-                "content": format!("You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines, follow the prompt guidelines for best results, prioritise users comments as feedback, aim for variety above all else, every image should be totally refreshing with nothing in common with the previous few, the overall style direction is '{}' (include this in every prompt, not exact wording but the meaning)", database.key_style)
+                "content": format!("You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines, follow the prompt guidelines for best results, the overall style direction is '{}' (include this in every prompt, not exact wording but the meaning)", database.key_style)
             },
             {
                 "role": "user",
-                "content": format!("Create me a new image prompt, {}Prompt:", user_message)
+                "content": format!("Create me a new image prompt from this description '{}' Prompt:", image_description)
             }
         ],
         "response_format": {
@@ -204,7 +244,6 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
         },
         "max_tokens": 4096
     });
-
     let response = client
         .post("https://api.openai.com/v1/chat/completions")
         .header("Content-Type", "application/json")
@@ -213,33 +252,16 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
         .send()
         .await?;
     let response_json: Value = response.json().await?;
-    let json_response = response_json["choices"]
-        .get(0)
-        .and_then(|choice| choice["message"]["content"].as_str())
-        .map_or_else(
-            || Err(anyhow!("No content found in response {}", response_json)),
-            |content| Ok(content.to_string()),
-        )?;
-
-    let parsed_response: PromptData = serde_json::from_str(&json_response)?;
-
-    // Log token usage
-    let prompt_tokens = response_json["usage"]["prompt_tokens"].as_u64().unwrap();
-    let completition_tokens = response_json["usage"]["completion_tokens"]
-        .as_u64()
-        .unwrap();
-    let (prompt_ppm, completition_ppm) = (0.15, 0.6);
-    let (prompt_cost, completition_cost) = (
-        (prompt_ppm / 1_000_000.0) * prompt_tokens as f32,
-        (completition_ppm / 1_000_000.0) * completition_tokens as f32,
-    );
-    let total_cost = prompt_cost + completition_cost;
-    log::info!(
-        "Generated prompt using {} prompt tokens and {} completition tokens at ${}",
-        prompt_tokens,
-        completition_tokens,
-        total_cost,
-    );
+    let parsed_response: PromptData = serde_json::from_str(
+        &response_json["choices"]
+            .get(0)
+            .and_then(|choice| choice["message"]["content"].as_str())
+            .map_or_else(
+                || Err(anyhow!("No content found in response {}", response_json)),
+                |content| Ok(content.to_string()),
+            )?,
+    )?;
+    print_gpt_pricing("Generated prompt", &response_json);
 
     Ok(parsed_response)
 }
@@ -359,7 +381,6 @@ pub async fn vision_image(image: DynamicImage) -> Result<VisionData> {
         },
         "max_tokens": 4096
     });
-
     let response = client
         .post("https://api.openai.com/v1/chat/completions")
         .header("Content-Type", "application/json")
@@ -377,24 +398,34 @@ pub async fn vision_image(image: DynamicImage) -> Result<VisionData> {
         )?;
 
     let parsed_response: VisionData = serde_json::from_str(&json_response)?;
+    print_gpt_pricing("Visioned image", &response_json);
 
-    // Log token usage
-    let prompt_tokens = response_json["usage"]["prompt_tokens"].as_u64().unwrap();
-    let completition_tokens = response_json["usage"]["completion_tokens"]
-        .as_u64()
-        .unwrap();
-    let (prompt_ppm, completition_ppm) = (0.15, 0.6);
+    Ok(parsed_response)
+}
+
+fn print_gpt_pricing(desc: &str, response: &Value) {
+    let model_pricing = HashMap::from([
+        ("gpt-4o", (5.0, 15.0)),
+        ("gpt-4o-2024-08-06", (2.5, 10.0)),
+        ("gpt-4o-2024-05-13", (5.0, 15.0)),
+        ("gpt-4o-mini", (0.15, 0.6)),
+        ("gpt-4o-mini-2024-07-18", (0.15, 0.6)),
+    ]);
+    let model = response["model"].as_str().unwrap();
+    let (prompt_ppm, completition_ppm) = model_pricing.get(model).unwrap();
+
+    let prompt_tokens = response["usage"]["prompt_tokens"].as_u64().unwrap();
+    let completition_tokens = response["usage"]["completion_tokens"].as_u64().unwrap();
     let (prompt_cost, completition_cost) = (
         (prompt_ppm / 1_000_000.0) * prompt_tokens as f32,
         (completition_ppm / 1_000_000.0) * completition_tokens as f32,
     );
     let total_cost = prompt_cost + completition_cost;
     log::info!(
-        "Visioned image using {} prompt tokens and {} completition tokens at ${}",
+        "{} using {} prompt tokens and {} completition tokens at ${}",
+        desc,
         prompt_tokens,
         completition_tokens,
         total_cost,
     );
-
-    Ok(parsed_response)
 }

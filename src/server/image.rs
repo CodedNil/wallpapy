@@ -7,6 +7,7 @@ use anyhow::{anyhow, Result};
 use axum::http::{HeaderMap, HeaderValue};
 use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use chrono::{Timelike, Utc};
 use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, ImageReader, Pixel};
@@ -16,10 +17,6 @@ use serde_json::json;
 use std::io::Cursor;
 use std::{env, path::Path, time::Duration};
 use thumbhash::rgba_to_thumb_hash;
-use time::{
-    format_description::{self, well_known::Rfc3339},
-    OffsetDateTime,
-};
 use tokio::fs;
 use uuid::Uuid;
 
@@ -166,7 +163,7 @@ pub async fn favourites() -> impl IntoResponse {
 }
 
 pub async fn smartget() -> impl IntoResponse {
-    let now = OffsetDateTime::now_utc();
+    let now = Utc::now();
     let hour = now.hour();
 
     let time_of_day = if (hour > 6 && hour < 10) || hour > 19 && hour < 22 {
@@ -354,9 +351,7 @@ pub async fn generate_wallpaper_impl(
     log::info!("Generating wallpaper");
 
     let id = Uuid::new_v4();
-    let datetime = OffsetDateTime::now_utc();
-    let format = format_description::parse("[day]/[month]/[year] [hour]:[minute]")?;
-    let datetime_text = datetime.format(&format)?;
+    let datetime = Utc::now();
 
     // Generate image prompt
     let prompt_data = if let Some(prompt_data) = prompt_data {
@@ -386,7 +381,7 @@ pub async fn generate_wallpaper_impl(
     let dir = Path::new("wallpapers");
     fs::create_dir_all(dir).await?;
 
-    let datetime_str = datetime.format(&Rfc3339)?;
+    let datetime_str = datetime.to_rfc3339();
 
     // Save the original image
     let file_name = format!("{datetime_str}.webp");
@@ -425,9 +420,7 @@ pub async fn generate_wallpaper_impl(
 
     let wallpaper = WallpaperData {
         id,
-
         datetime,
-        datetime_text,
 
         prompt_data,
         vision_data,
@@ -476,7 +469,7 @@ pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper: WallpaperData) -> Resul
     // Save to file
     let dir = Path::new("wallpapers");
     fs::create_dir_all(dir).await?;
-    let datetime_str = wallpaper.datetime.format(&Rfc3339)?;
+    let datetime_str = wallpaper.datetime.to_rfc3339();
 
     // Save the upscaled image
     let upscaled_file_name = format!("{datetime_str}_upscaled.webp");

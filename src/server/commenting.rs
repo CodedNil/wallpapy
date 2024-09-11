@@ -1,7 +1,7 @@
 use crate::common::{CommentData, TokenStringPacket, TokenUuidPacket};
 use crate::server::{auth::verify_token, read_database, write_database};
 use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
-use time::{format_description, OffsetDateTime};
+use chrono::Utc;
 use uuid::Uuid;
 
 pub async fn add(packet: Bytes) -> impl IntoResponse {
@@ -21,16 +21,13 @@ pub async fn add(packet: Bytes) -> impl IntoResponse {
     let result = async {
         let mut database = read_database().await?;
         let id = Uuid::new_v4();
-        let datetime = OffsetDateTime::now_utc();
-        let format = format_description::parse("[day]/[month]/[year] [hour]:[minute]")?;
-        let datetime_text = datetime.format(&format)?;
+        let datetime = Utc::now();
 
         database.comments.insert(
             id,
             CommentData {
                 id,
                 datetime,
-                datetime_text,
                 comment: packet.string,
             },
         );

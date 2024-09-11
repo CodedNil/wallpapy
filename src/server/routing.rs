@@ -3,9 +3,9 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use time::OffsetDateTime;
+use chrono::{Duration, Utc};
 
-const NEW_WALLPAPER_INTERVAL: time::Duration = time::Duration::hours(6);
+const NEW_WALLPAPER_INTERVAL: Duration = Duration::hours(6);
 
 pub fn setup_routes(app: Router) -> Router {
     app.route("/login", post(login_server))
@@ -27,7 +27,7 @@ pub async fn start_server() {
         match read_database().await {
             Ok(database) => {
                 // Generate a new wallpaper every NEW_WALLPAPER_INTERVAL
-                let cur_time = OffsetDateTime::now_utc();
+                let cur_time = Utc::now();
                 let latest_time = database
                     .wallpapers
                     .iter()

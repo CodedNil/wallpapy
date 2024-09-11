@@ -1,14 +1,12 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, VariantNames};
-use time::OffsetDateTime;
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct WallpaperData {
     pub id: Uuid,
-
-    pub datetime: OffsetDateTime,
-    pub datetime_text: String,
+    pub datetime: DateTime<Utc>,
 
     pub prompt_data: PromptData,
     pub vision_data: VisionData,
@@ -26,10 +24,7 @@ pub struct WallpaperData {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct CommentData {
     pub id: Uuid,
-
-    pub datetime: OffsetDateTime,
-    pub datetime_text: String,
-
+    pub datetime: DateTime<Utc>,
     pub comment: String,
 }
 

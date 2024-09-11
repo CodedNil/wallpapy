@@ -5,10 +5,10 @@ use argon2::{
     Argon2,
 };
 use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
+use chrono::{DateTime, Utc};
 use rand::{distributions, thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use time::OffsetDateTime;
 use tokio::{
     fs::{self, OpenOptions},
     io::AsyncReadExt,
@@ -19,18 +19,19 @@ const MIN_PASSWORD_LENGTH: usize = 6;
 const TOKEN_LENGTH: usize = 20;
 const AUTH_FILE: &str = "auth.ron";
 
-nestify::nest! {
-    #[derive(Serialize, Deserialize)]*
-    struct Account {
-        admin: bool,
-        uuid: Uuid,
-        username: String,
-        password_hash: String,
-        tokens: Vec<struct Token {
-            token: String,
-            last_used: OffsetDateTime,
-        }>,
-    }
+#[derive(Serialize, Deserialize)]
+struct Account {
+    admin: bool,
+    uuid: Uuid,
+    username: String,
+    password_hash: String,
+    tokens: Vec<Token>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Token {
+    token: String,
+    last_used: DateTime<Utc>,
 }
 
 type Accounts = HashMap<Uuid, Account>;
@@ -167,7 +168,7 @@ fn generate_token() -> (Token, String) {
         .collect();
     let token = Token {
         token: new_token.clone(),
-        last_used: OffsetDateTime::now_utc(),
+        last_used: Utc::now(),
     };
     (token, new_token)
 }
@@ -182,7 +183,7 @@ pub async fn verify_token(input_token: &str) -> Result<bool> {
             .iter_mut()
             .find(|token| token.token == input_token)
         {
-            token_entry.last_used = OffsetDateTime::now_utc();
+            token_entry.last_used = Utc::now();
             write_accounts(&accounts).await?;
             return Ok(true);
         }

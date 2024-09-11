@@ -10,6 +10,7 @@ use crate::{
     PORT,
 };
 use anyhow::Result;
+use chrono::Local;
 use egui::{
     vec2, Align2, CentralPanel, Color32, Context, CursorIcon, FontId, Frame, Image, Key,
     PointerButton, Rect, RichText, ScrollArea, Sense, Shape, TextEdit, Vec2, Widget, Window,
@@ -109,8 +110,6 @@ impl eframe::App for Wallpapy {
         let mut fonts = egui::FontDefinitions::default();
         egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
         ctx.set_fonts(fonts);
-
-        ctx.request_repaint();
 
         self.get_gallery(ctx);
         if self.stored.auth_token.is_empty() {
@@ -421,8 +420,13 @@ impl Wallpapy {
         let mut sub_button_hovered = false;
 
         // Draw date in top-left corner
+        let datetime_text = wallpaper
+            .datetime
+            .with_timezone(&Local)
+            .format("%d/%m/%Y %H:%M")
+            .to_string();
         let datetime_galley = painter.layout_no_wrap(
-            wallpaper.datetime_text.clone(),
+            datetime_text,
             FontId::proportional(ui_scale),
             Color32::WHITE.gamma_multiply(0.8),
         );
@@ -684,8 +688,13 @@ impl Wallpapy {
         ));
 
         // Draw date in top-left corner
+        let datetime_text = comment
+            .datetime
+            .with_timezone(&Local)
+            .format("%d/%m/%Y %H:%M")
+            .to_string();
         let datetime_galley = painter.layout_no_wrap(
-            comment.datetime_text.clone(),
+            datetime_text,
             FontId::proportional(ui_scale),
             Color32::WHITE.gamma_multiply(0.8),
         );

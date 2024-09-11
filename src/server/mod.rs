@@ -1,8 +1,8 @@
 use crate::common::{CommentData, WallpaperData};
 use anyhow::Result;
+use chrono::Duration;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use time::Duration;
 use tokio::{
     fs::{self, OpenOptions},
     io::AsyncReadExt,
@@ -48,10 +48,10 @@ async fn write_database(database: &Database) -> Result<()> {
 }
 
 fn format_duration(duration: Duration) -> String {
-    let minutes = duration.whole_minutes();
-    let hours = duration.whole_hours();
-    let days = duration.whole_days();
-    let weeks = duration.whole_weeks();
+    let minutes = duration.num_minutes();
+    let hours = duration.num_hours();
+    let days = duration.num_days();
+    let weeks = duration.num_weeks();
 
     match (weeks, days, hours, minutes) {
         (w, _, _, _) if w >= 1 => format!("{} week{}", w, if w == 1 { "" } else { "s" }),
