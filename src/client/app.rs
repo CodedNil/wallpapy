@@ -1,12 +1,9 @@
 use crate::{
     client::networking::{
-        add_comment, edit_key_style, generate_wallpaper, get_gallery, like_image, login,
+        add_comment, edit_key_style, generate_wallpaper, get_database, like_image, login,
         recreate_image, remove_comment, remove_image,
     },
-    common::{
-        Brightness, CommentData, DatabaseObjectType, GetWallpapersResponse, LikedState,
-        WallpaperData,
-    },
+    common::{Brightness, CommentData, Database, DatabaseObjectType, LikedState, WallpaperData},
     PORT,
 };
 use anyhow::Result;
@@ -27,10 +24,8 @@ nestify::nest! {
         host: String,
         toasts: Arc<Mutex<Toasts>>,
 
-        wallpapers: Option<Vec<WallpaperData>>,
-        comments: Option<Vec<CommentData>>,
+        database: Option<Database>,
         fullscreen_image: Option<WallpaperData>,
-        key_style: String,
 
         #>[derive(Deserialize, Serialize, Default)]
         #>[serde(default)]
@@ -57,7 +52,7 @@ nestify::nest! {
                 #[default]
                 Wanted,
                 InProgress,
-                Done(Result<GetWallpapersResponse>),
+                Done(Result<Database>),
             },
         }>>,
     }
@@ -75,9 +70,7 @@ impl Wallpapy {
         Self {
             host: format!("localhost:{PORT}"),
             toasts: Arc::new(Mutex::new(Toasts::default())),
-            wallpapers: None,
-            comments: None,
-            key_style: String::new(),
+            database: None,
             fullscreen_image: None,
             stored,
             login_form: LoginForm {
@@ -166,23 +159,25 @@ impl Wallpapy {
                     self.stored.auth_token.clear();
                 }
             });
-            ui.horizontal(|ui| {
-                if ui.button("Update").clicked() {
-                    let toasts_store = self.toasts.clone();
-                    let network_store = self.network_data.clone();
-                    edit_key_style(
-                        &self.host,
-                        &self.stored.auth_token,
-                        self.key_style.trim(),
-                        move |result| {
-                            button_pressed_result(result, &network_store, &toasts_store, "");
-                        },
-                    );
-                }
-                TextEdit::singleline(&mut self.key_style)
-                    .desired_width(f32::INFINITY)
-                    .ui(ui);
-            });
+            if let Some(database) = &mut self.database {
+                ui.horizontal(|ui| {
+                    if ui.button("Update").clicked() {
+                        let toasts_store = self.toasts.clone();
+                        let network_store = self.network_data.clone();
+                        edit_key_style(
+                            &self.host,
+                            &self.stored.auth_token,
+                            database.key_style.trim(),
+                            move |result| {
+                                button_pressed_result(result, &network_store, &toasts_store, "");
+                            },
+                        );
+                    }
+                    TextEdit::singleline(&mut database.key_style)
+                        .desired_width(f32::INFINITY)
+                        .ui(ui);
+                });
+            }
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -301,7 +296,7 @@ impl Wallpapy {
                     ui.input(|i| i.key_pressed(Key::ArrowLeft) || i.key_pressed(Key::A));
                 let right_pressed =
                     ui.input(|i| i.key_pressed(Key::ArrowRight) || i.key_pressed(Key::D));
-                if (left_pressed || right_pressed) && self.wallpapers.is_some() {
+                if (left_pressed || right_pressed) && self.database.is_some() {
                     let mut target_datetime = None;
                     let mut target_wallpaper = None;
 
@@ -311,7 +306,7 @@ impl Wallpapy {
                         |dt1, dt2| dt1 < dt2
                     };
 
-                    for paper in self.wallpapers.as_ref().unwrap() {
+                    for paper in self.database.as_ref().unwrap().wallpapers.values() {
                         if comparison(paper.datetime, wallpaper.datetime)
                             && (target_datetime.is_none()
                                 || comparison(target_datetime.unwrap(), paper.datetime))
@@ -325,17 +320,18 @@ impl Wallpapy {
                         new_fullscreen = Some(target_wallpaper);
                     }
                 }
-            } else if let (Some(wallpapers), Some(comments)) = (&self.wallpapers, &self.comments) {
+            } else if let Some(database) = &self.database {
                 // Collect the wallpapers and comments into a single list, sorted by datetime
-                let mut combined_list = wallpapers
-                    .iter()
+                let mut combined_list = database
+                    .wallpapers
+                    .values()
                     .map(|wallpaper| {
                         (
                             wallpaper.datetime,
                             DatabaseObjectType::Wallpaper(wallpaper.clone()),
                         )
                     })
-                    .chain(comments.iter().map(|comment| {
+                    .chain(database.comments.values().map(|comment| {
                         (
                             comment.datetime,
                             DatabaseObjectType::Comment(comment.clone()),
@@ -776,16 +772,14 @@ impl Wallpapy {
                 network_data_guard.get_gallery = GetGalleryState::InProgress;
                 drop(network_data_guard);
 
-                get_gallery(&self.host, move |res| {
+                get_database(&self.host, move |res| {
                     network_store.lock().get_gallery = GetGalleryState::Done(res);
                 });
             }
             GetGalleryState::Done(ref response) => {
                 match response {
                     Ok(database) => {
-                        self.key_style.clone_from(&database.key_style);
-                        self.wallpapers = Some(database.images.clone());
-                        self.comments = Some(database.comments.clone());
+                        self.database = Some(database.clone());
                     }
                     Err(e) => {
                         log::error!("Failed to fetch galleries: {:?}", e);

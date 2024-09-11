@@ -1,13 +1,11 @@
-use crate::common::{CommentData, WallpaperData};
+use crate::common::Database;
 use anyhow::Result;
 use chrono::Duration;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::{
     fs::{self, OpenOptions},
     io::AsyncReadExt,
 };
-use uuid::Uuid;
 
 mod auth;
 mod commenting;
@@ -16,13 +14,6 @@ mod image;
 pub mod routing;
 
 const DATABASE_FILE: &str = "database.ron";
-
-#[derive(Serialize, Deserialize)]
-struct Database {
-    key_style: String,
-    wallpapers: HashMap<Uuid, WallpaperData>,
-    comments: HashMap<Uuid, CommentData>,
-}
 
 async fn read_database() -> Result<Database> {
     if fs::metadata(DATABASE_FILE).await.is_err() {

@@ -1,8 +1,8 @@
 use crate::common::{
-    Brightness, ColorPalette, DatabaseObjectType, ImageMood, LikedState, PromptData, Season,
-    SubjectMatter, TimeOfDay, VisionData,
+    Brightness, ColorPalette, Database, DatabaseObjectType, ImageMood, LikedState, PromptData,
+    Season, SubjectMatter, TimeOfDay, VisionData,
 };
-use crate::server::{format_duration, read_database, Database};
+use crate::server::{format_duration, read_database};
 use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chrono::Utc;
@@ -310,7 +310,7 @@ pub async fn vision_image(image: DynamicImage) -> Result<VisionData> {
                 },
                 "season": {
                     "type": "string",
-                    "description": "The season for the image",
+                    "description": "The season for the image, pick spring summer autumn or winter most of the time, pick other for magical scenes etc, and unknown if it is unclear e.g. set in space",
                     "enum": Season::VARIANTS
                 },
 

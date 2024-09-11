@@ -1,6 +1,6 @@
 use crate::common::{
-    ColorData, GetWallpapersResponse, ImageFile, LikedState, PromptData, TimeOfDay,
-    TokenStringPacket, TokenUuidLikedPacket, TokenUuidPacket, WallpaperData,
+    ColorData, ImageFile, LikedState, PromptData, TimeOfDay, TokenStringPacket,
+    TokenUuidLikedPacket, TokenUuidPacket, WallpaperData,
 };
 use crate::server::{auth::verify_token, gpt, read_database, write_database};
 use anyhow::{anyhow, Result};
@@ -49,28 +49,6 @@ pub async fn generate(packet: Bytes) -> impl IntoResponse {
         Err(e) => {
             log::error!("Failed to generate wallpaper: {:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR
-        }
-    }
-}
-
-pub async fn get() -> impl IntoResponse {
-    match read_database().await {
-        Ok(database) => {
-            match bincode::serialize(&GetWallpapersResponse {
-                key_style: database.key_style,
-                images: database.wallpapers.values().cloned().collect(),
-                comments: database.comments.values().cloned().collect(),
-            }) {
-                Ok(data) => (StatusCode::OK, data).into_response(),
-                Err(e) => {
-                    log::error!("{:?}", e);
-                    StatusCode::INTERNAL_SERVER_ERROR.into_response()
-                }
-            }
-        }
-        Err(e) => {
-            log::error!("{:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
 }

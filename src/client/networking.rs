@@ -1,6 +1,5 @@
 use crate::common::{
-    GetWallpapersResponse, LikedState, LoginPacket, TokenStringPacket, TokenUuidLikedPacket,
-    TokenUuidPacket,
+    Database, LikedState, LoginPacket, TokenStringPacket, TokenUuidLikedPacket, TokenUuidPacket,
 };
 use anyhow::Result;
 use uuid::Uuid;
@@ -61,10 +60,7 @@ pub fn generate_wallpaper(
     );
 }
 
-pub fn get_gallery(
-    host: &str,
-    on_done: impl 'static + Send + FnOnce(Result<GetWallpapersResponse>),
-) {
+pub fn get_database(host: &str, on_done: impl 'static + Send + FnOnce(Result<Database>)) {
     ehttp::fetch(
         ehttp::Request::get(format!("http://{host}/get")),
         Box::new(move |res: std::result::Result<ehttp::Response, String>| {
@@ -72,15 +68,15 @@ pub fn get_gallery(
                 Ok(res) => {
                     if res.status == 200 {
                         bincode::deserialize(&res.bytes)
-                            .map_or_else(|_| Err(anyhow::anyhow!("Failed to load gallery")), Ok)
+                            .map_or_else(|_| Err(anyhow::anyhow!("Failed to load database")), Ok)
                     } else {
                         Err(anyhow::anyhow!(
-                            "Failed to load gallery, status code: {}",
+                            "Failed to load database, status code: {}",
                             res.status
                         ))
                     }
                 }
-                Err(e) => Err(anyhow::anyhow!("Network error loading gallery: {}", e)),
+                Err(e) => Err(anyhow::anyhow!("Network error loading database: {}", e)),
             });
         }),
     );

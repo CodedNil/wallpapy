@@ -1,5 +1,7 @@
 use crate::server::{auth::login_server, commenting, format_duration, image, read_database};
 use axum::{
+    http::StatusCode,
+    response::IntoResponse,
     routing::{get, post},
     Router,
 };
@@ -9,7 +11,7 @@ const NEW_WALLPAPER_INTERVAL: Duration = Duration::hours(6);
 
 pub fn setup_routes(app: Router) -> Router {
     app.route("/login", post(login_server))
-        .route("/get", get(image::get))
+        .route("/get", get(get_database))
         .route("/latest", get(image::latest))
         .route("/favourites", get(image::favourites))
         .route("/smartget", get(image::smartget))
@@ -20,6 +22,22 @@ pub fn setup_routes(app: Router) -> Router {
         .route("/imageremove", post(image::remove))
         .route("/imagerecreate", post(image::recreate))
         .route("/keystyle", post(commenting::key_style))
+}
+
+pub async fn get_database() -> impl IntoResponse {
+    match read_database().await {
+        Ok(database) => match bincode::serialize(&database) {
+            Ok(data) => (StatusCode::OK, data).into_response(),
+            Err(e) => {
+                log::error!("{:?}", e);
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            }
+        },
+        Err(e) => {
+            log::error!("{:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 
 pub async fn start_server() {

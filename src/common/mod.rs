@@ -1,7 +1,15 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use strum_macros::{Display, VariantNames};
 use uuid::Uuid;
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Database {
+    pub key_style: String,
+    pub wallpapers: HashMap<Uuid, WallpaperData>,
+    pub comments: HashMap<Uuid, CommentData>,
+}
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct WallpaperData {
@@ -222,11 +230,4 @@ pub struct TokenUuidLikedPacket {
 pub enum DatabaseObjectType {
     Wallpaper(WallpaperData),
     Comment(CommentData),
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct GetWallpapersResponse {
-    pub key_style: String,
-    pub images: Vec<WallpaperData>,
-    pub comments: Vec<CommentData>,
 }
