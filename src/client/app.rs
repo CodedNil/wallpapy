@@ -47,7 +47,7 @@ nestify::nest! {
                 InProgress,
                 Done(Result<String>),
             },
-            get_gallery: enum GetGalleryState {
+            get_database: enum GetDatabaseState {
                 None,
                 #[default]
                 Wanted,
@@ -104,7 +104,7 @@ impl eframe::App for Wallpapy {
         egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
         ctx.set_fonts(fonts);
 
-        self.get_gallery(ctx);
+        self.get_database(ctx);
         if self.stored.auth_token.is_empty() {
             self.show_login_panel(ctx);
         } else {
@@ -123,11 +123,13 @@ impl Wallpapy {
                     let toasts_store = self.toasts.clone();
                     let network_store = self.network_data.clone();
                     toasts_store.lock().info("Generating Wallpaper");
+                    let ctx = ctx.clone();
                     generate_wallpaper(
                         &self.host,
                         &self.stored.auth_token,
                         self.comment_submission.trim(),
                         move |result| {
+                            ctx.request_repaint();
                             button_pressed_result(
                                 result,
                                 &network_store,
@@ -144,11 +146,13 @@ impl Wallpapy {
                 if ui.button("Submit Comment").clicked() {
                     let toasts_store = self.toasts.clone();
                     let network_store = self.network_data.clone();
+                    let ctx = ctx.clone();
                     add_comment(
                         &self.host,
                         &self.stored.auth_token,
                         self.comment_submission.trim(),
                         move |result| {
+                            ctx.request_repaint();
                             button_pressed_result(result, &network_store, &toasts_store, "");
                         },
                     );
@@ -164,11 +168,13 @@ impl Wallpapy {
                     if ui.button("Update").clicked() {
                         let toasts_store = self.toasts.clone();
                         let network_store = self.network_data.clone();
+                        let ctx = ctx.clone();
                         edit_key_style(
                             &self.host,
                             &self.stored.auth_token,
                             database.key_style.trim(),
                             move |result| {
+                                ctx.request_repaint();
                                 button_pressed_result(result, &network_store, &toasts_store, "");
                             },
                         );
@@ -373,7 +379,7 @@ impl Wallpapy {
                     })
                 });
                 if refresh_response.should_refresh() {
-                    self.network_data.lock().get_gallery = GetGalleryState::Wanted;
+                    self.network_data.lock().get_database = GetDatabaseState::Wanted;
                     ui.ctx().forget_all_images();
                     ui.ctx().clear_animations();
                 }
@@ -462,11 +468,13 @@ impl Wallpapy {
             if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
                 let toasts_store = self.toasts.clone();
                 let network_store = self.network_data.clone();
+                let ctx = ui.ctx().clone();
                 remove_image(
                     &self.host,
                     &self.stored.auth_token,
                     &wallpaper.id,
                     move |result| {
+                        ctx.request_repaint();
                         button_pressed_result(result, &network_store, &toasts_store, "");
                     },
                 );
@@ -502,12 +510,16 @@ impl Wallpapy {
             if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
                 let toasts_store = self.toasts.clone();
                 let network_store = self.network_data.clone();
+                let ctx = ui.ctx().clone();
                 like_image(
                     &self.host,
                     &self.stored.auth_token,
                     &wallpaper.id,
                     LikedState::Disliked,
-                    move |result| button_pressed_result(result, &network_store, &toasts_store, ""),
+                    move |result| {
+                        ctx.request_repaint();
+                        button_pressed_result(result, &network_store, &toasts_store, "");
+                    },
                 );
             }
         }
@@ -541,12 +553,16 @@ impl Wallpapy {
             if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
                 let toasts_store = self.toasts.clone();
                 let network_store = self.network_data.clone();
+                let ctx = ui.ctx().clone();
                 like_image(
                     &self.host,
                     &self.stored.auth_token,
                     &wallpaper.id,
                     LikedState::Liked,
-                    move |result| button_pressed_result(result, &network_store, &toasts_store, ""),
+                    move |result| {
+                        ctx.request_repaint();
+                        button_pressed_result(result, &network_store, &toasts_store, "");
+                    },
                 );
             }
         }
@@ -580,12 +596,16 @@ impl Wallpapy {
             if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
                 let toasts_store = self.toasts.clone();
                 let network_store = self.network_data.clone();
+                let ctx = ui.ctx().clone();
                 like_image(
                     &self.host,
                     &self.stored.auth_token,
                     &wallpaper.id,
                     LikedState::Loved,
-                    move |result| button_pressed_result(result, &network_store, &toasts_store, ""),
+                    move |result| {
+                        ctx.request_repaint();
+                        button_pressed_result(result, &network_store, &toasts_store, "");
+                    },
                 );
             }
         }
@@ -614,11 +634,15 @@ impl Wallpapy {
             if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
                 let toasts_store = self.toasts.clone();
                 let network_store = self.network_data.clone();
+                let ctx = ui.ctx().clone();
                 recreate_image(
                     &self.host,
                     &self.stored.auth_token,
                     &wallpaper.id,
-                    move |result| button_pressed_result(result, &network_store, &toasts_store, ""),
+                    move |result| {
+                        ctx.request_repaint();
+                        button_pressed_result(result, &network_store, &toasts_store, "");
+                    },
                 );
             }
         }
@@ -725,11 +749,15 @@ impl Wallpapy {
             if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
                 let toasts_store = self.toasts.clone();
                 let network_store = self.network_data.clone();
+                let ctx = ui.ctx().clone();
                 remove_comment(
                     &self.host,
                     &self.stored.auth_token,
                     &comment.id,
-                    move |result| button_pressed_result(result, &network_store, &toasts_store, ""),
+                    move |result| {
+                        ctx.request_repaint();
+                        button_pressed_result(result, &network_store, &toasts_store, "");
+                    },
                 );
             }
         }
@@ -761,22 +789,23 @@ impl Wallpapy {
         }
     }
 
-    fn get_gallery(&mut self, ctx: &Context) {
+    fn get_database(&mut self, ctx: &Context) {
         let network_store = self.network_data.clone();
         let mut network_data_guard = network_store.lock();
-        match &network_data_guard.get_gallery {
-            GetGalleryState::InProgress | GetGalleryState::None => {}
-            GetGalleryState::Wanted => {
-                log::info!("Fetching gallery");
+        match &network_data_guard.get_database {
+            GetDatabaseState::InProgress | GetDatabaseState::None => {}
+            GetDatabaseState::Wanted => {
+                log::info!("Fetching database");
                 ctx.request_repaint();
-                network_data_guard.get_gallery = GetGalleryState::InProgress;
+                network_data_guard.get_database = GetDatabaseState::InProgress;
                 drop(network_data_guard);
 
                 get_database(&self.host, move |res| {
-                    network_store.lock().get_gallery = GetGalleryState::Done(res);
+                    network_store.lock().get_database = GetDatabaseState::Done(res);
                 });
             }
-            GetGalleryState::Done(ref response) => {
+            GetDatabaseState::Done(ref response) => {
+                ctx.request_repaint();
                 match response {
                     Ok(database) => {
                         self.database = Some(database.clone());
@@ -785,7 +814,7 @@ impl Wallpapy {
                         log::error!("Failed to fetch galleries: {:?}", e);
                     }
                 }
-                network_data_guard.get_gallery = GetGalleryState::None;
+                network_data_guard.get_database = GetDatabaseState::None;
             }
         }
     }
@@ -881,7 +910,7 @@ fn button_pressed_result(
             if !success_str.is_empty() {
                 toasts_store.lock().success(success_str);
             }
-            network_store.lock().get_gallery = GetGalleryState::Wanted;
+            network_store.lock().get_database = GetDatabaseState::Wanted;
         }
         Err(e) => {
             toasts_store
