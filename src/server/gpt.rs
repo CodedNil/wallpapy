@@ -1,14 +1,10 @@
 use crate::common::{
-    Brightness, ColorPalette, Database, DatabaseObjectType, ImageMood, LikedState, PromptData,
-    Season, SubjectMatter, TimeOfDay, VisionData,
+    ColorPalette, Database, DatabaseObjectType, ImageMood, LikedState, PromptData, Season,
+    SubjectMatter, TimeOfDay,
 };
 use crate::server::{format_duration, read_database};
 use anyhow::{anyhow, Result};
-use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chrono::Utc;
-use image::codecs::jpeg::JpegEncoder;
-use image::imageops::FilterType;
-use image::DynamicImage;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use reqwest::Client;
@@ -124,16 +120,19 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
 
     let cur_time = Utc::now();
     let mut history_string = Vec::new();
-    for (i, (date, data)) in database_history.iter().take(30).enumerate() {
+    let mut discarded_loves = Vec::new();
+    let mut discarded_likes = Vec::new();
+    let mut discarded_dislikes = Vec::new();
+    let mut discarded_others = Vec::new();
+    for (i, (date, data)) in database_history.iter().rev().enumerate() {
         let datetime_text = format_duration(cur_time - date);
-        let (should_add, text) = match data {
-            DatabaseObjectType::Wallpaper(wallpaper) => (
-                i < match wallpaper.liked_state {
-                    LikedState::Loved => 30,
-                    LikedState::Liked | LikedState::Disliked => 15,
-                    LikedState::None => 10,
-                },
-                format!(
+        if let DatabaseObjectType::Wallpaper(wallpaper) = data {
+            if i < match wallpaper.liked_state {
+                LikedState::Loved => 30,
+                LikedState::Liked | LikedState::Disliked => 15,
+                LikedState::None => 10,
+            } {
+                history_string.push(format!(
                     "{datetime_text} ago - Wallpaper created{} '{}'",
                     match wallpaper.liked_state {
                         LikedState::Loved => " (user LOVED this)",
@@ -142,19 +141,72 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
                         LikedState::None => "",
                     },
                     wallpaper.prompt_data.shortened_prompt
-                ),
-            ),
-            DatabaseObjectType::Comment(comment) => (
-                i < 10,
-                format!("{datetime_text} - User commented: '{}'", comment.comment),
-            ),
-        };
-        if should_add {
-            history_string.push(text);
+                ));
+            } else {
+                let text = wallpaper.prompt_data.shortened_prompt.clone();
+                match wallpaper.liked_state {
+                    LikedState::Loved => {
+                        discarded_loves.push(text);
+                    }
+                    LikedState::Liked => {
+                        discarded_likes.push(text);
+                    }
+                    LikedState::Disliked => {
+                        discarded_dislikes.push(text);
+                    }
+                    LikedState::None => {
+                        discarded_others.push(text);
+                    }
+                }
+            }
+        }
+        if let DatabaseObjectType::Comment(comment) = data {
+            if i < 10 {
+                history_string.push(format!(
+                    "{datetime_text} - User commented: '{}'",
+                    comment.comment
+                ));
+            }
         }
     }
-    let history_string = history_string.join("\n");
 
+    // Use gpt mini to summarise the discarded string into the key elements
+    let request_body = json!({
+        "model": "gpt-4o-mini",
+        "messages": [
+            {
+                "role": "user",
+                "content": format!(
+                    "Summarise this history of image descriptions, taking out just the key concepts to create 3 comma separated lists of them without new lines, do not include common things like seasons, time of day etc, and do not repeat similar items, ideally 1 word per item, max 3 words per item if needed\nExample output: (user LOVED: item, item) (user liked: item, item, item) (user disliked: item, item) (others: item, item)\n\nLoved items: {}\nLiked items: {}\nDisliked items: {}\nOther items: {}\nOutput:",
+                    discarded_loves.join(", "),
+                    discarded_likes.join(", "),
+                    discarded_dislikes.join(", "),
+                    discarded_others.join(", ")
+                )
+            }
+        ],
+        "max_tokens": 4096
+    });
+    let response = client
+        .post("https://api.openai.com/v1/chat/completions")
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {api_key}"))
+        .json(&request_body)
+        .send()
+        .await?;
+    let response_json: Value = response.json().await?;
+    let discarded_summary = response_json["choices"]
+        .get(0)
+        .and_then(|choice| choice["message"]["content"].as_str())
+        .map_or_else(
+            || Err(anyhow!("No content found in response {}", response_json)),
+            |content| Ok(content.to_string()),
+        )?;
+    print_gpt_pricing("Summarised discarded items", &response_json);
+    history_string.push(format!("Summary of older history: {discarded_summary}"));
+
+    // Create the image description
+    let history_string = history_string.join("\n");
     let user_message = message.map_or_else(
         || {
             let random_number = rand::thread_rng().gen_range(1..=3);
@@ -204,6 +256,7 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
             |content| Ok(content.to_string()),
         )?;
     print_gpt_pricing("Generated description", &response_json);
+    log::info!("Generated description: {}", image_description);
 
     // Make another gpt request to write out the full prompt in the correct format
     let request_body = json!({
@@ -224,20 +277,56 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
             }
         ],
         "response_format": {
-          "type": "json_schema",
-          "json_schema": {
-            "name": "prompt_data",
-            "schema": {
-              "type": "object",
-              "properties": {
-                "prompt": { "type": "string" },
-                "shortened_prompt": {
-                    "type": "string",
-                    "description": "A shortened version of the prompt, only including the image description, max 25 words",
-                },
-              },
-              "required": ["prompt", "shortened_prompt"],
-              "additionalProperties": false
+            "type": "json_schema",
+            "json_schema": {
+                "name": "prompt_data",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "time_of_day": {
+                            "type": "string",
+                            "description": "The time of day for the image",
+                            "enum": TimeOfDay::VARIANTS
+                        },
+                        "season": {
+                            "type": "string",
+                            "description": "The season for the image, pick spring summer autumn or winter most of the time, pick other for magical scenes etc, and unknown if it is unclear e.g. set in space",
+                            "enum": Season::VARIANTS
+                        },
+
+                        "image_mood": {
+                            "type": "array",
+                            "description": "The moods for the image, max 3",
+                            "items": {
+                                "type": "string",
+                                "enum": ImageMood::VARIANTS
+                            }
+                        },
+                        "color_palette": {
+                            "type": "array",
+                            "description": "The color palette for the image, max 3",
+                            "items": {
+                                "type": "string",
+                                "enum": ColorPalette::VARIANTS
+                            }
+                        },
+                        "subject_matter": {
+                            "type": "array",
+                            "description":   "The subject matter for the image, max 3",
+                            "items": {
+                                "type": "string",
+                                "enum": SubjectMatter::VARIANTS
+                            }
+                        },
+
+                        "prompt": { "type": "string" },
+                        "shortened_prompt": {
+                            "type": "string",
+                            "description": "A shortened version of the prompt, only including the image description, max 25 words",
+                        },
+                    },
+                "required": ["time_of_day", "season", "image_mood", "color_palette", "subject_matter", "prompt", "shortened_prompt"],
+                "additionalProperties": false
             },
             "strict": true
           }
@@ -262,143 +351,6 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
             )?,
     )?;
     print_gpt_pricing("Generated prompt", &response_json);
-
-    Ok(parsed_response)
-}
-
-pub async fn vision_image(image: DynamicImage) -> Result<VisionData> {
-    let api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not set");
-    let client = reqwest::Client::new();
-
-    let image = image.resize(854, 640, FilterType::Lanczos3);
-    let mut bytes = Vec::new();
-    let encoder = JpegEncoder::new_with_quality(&mut bytes, 90);
-    image.write_with_encoder(encoder)?;
-    let image_uri = format!("data:image/jpeg;base64,{}", STANDARD.encode(&bytes));
-
-    let request_body = json!({
-        "model": "gpt-4o-mini",
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                  {
-                    "type": "text",
-                    "text": "View this image and output data about it in required json schema'"
-                  },
-                  {
-                    "type": "image_url",
-                    "image_url": {
-                      "url": image_uri,
-                      "detail": "low"
-                    }
-                  }
-                ]
-            }
-        ],
-        "response_format": {
-          "type": "json_schema",
-          "json_schema": {
-            "name": "vision_data",
-            "schema": {
-              "type": "object",
-              "properties": {
-                "time_of_day": {
-                    "type": "string",
-                    "description": "The time of day for the image",
-                    "enum": TimeOfDay::VARIANTS
-                },
-                "season": {
-                    "type": "string",
-                    "description": "The season for the image, pick spring summer autumn or winter most of the time, pick other for magical scenes etc, and unknown if it is unclear e.g. set in space",
-                    "enum": Season::VARIANTS
-                },
-
-                "tags": {
-                    "type": "array",
-                    "description":  "The tags for the image, max 5, titlecase",
-                    "items": {
-                        "type": "string",
-                    }
-                },
-                "image_mood": {
-                    "type": "array",
-                     "description": "The moods for the image, max 3",
-                     "items": {
-                         "type": "string",
-                         "enum": ImageMood::VARIANTS
-                     }
-                 },
-                 "brightness": {
-                     "type": "string",
-                     "description": "How bright is the image",
-                     "enum": Brightness::VARIANTS
-                 },
-                 "color_palette": {
-                     "type": "array",
-                     "description": "The color palette for the image, max 3",
-                     "items": {
-                         "type": "string",
-                         "enum": ColorPalette::VARIANTS
-                     }
-                 },
-                 "key_colors": {
-                     "type": "array",
-                     "description": "The main colors in the image, in order of frequency/importance, max 6",
-                     "items": {
-                        "type": "object",
-                        "properties": {
-                            "name": {
-                                "type": "string",
-                                "description": "The name of the color, one or two words, focusing on more refined shades. For example, instead of saying purple you might specify lilac"
-                            },
-                            "rgb_values": {
-                                "type": "array",
-                                "description": "The rgb color, 3 u8 integers",
-                                "items": {
-                                "type": "number",
-                                },
-                            }
-                        },
-                        "required": ["name", "rgb_values"],
-                        "additionalProperties": false
-                    }
-                 },
-                 "subject_matter": {
-                     "type": "array",
-                     "description":   "The subject matter for the image, max 3",
-                     "items": {
-                         "type": "string",
-                         "enum": SubjectMatter::VARIANTS
-                     }
-                 },
-              },
-              "required": ["time_of_day", "season", "tags", "image_mood", "brightness", "color_palette", "key_colors", "subject_matter"],
-              "additionalProperties": false
-            },
-            "strict": true
-          }
-        },
-        "max_tokens": 4096
-    });
-    let response = client
-        .post("https://api.openai.com/v1/chat/completions")
-        .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {api_key}"))
-        .json(&request_body)
-        .send()
-        .await?;
-    let response_json: Value = response.json().await?;
-    let json_response = response_json["choices"]
-        .get(0)
-        .and_then(|choice| choice["message"]["content"].as_str())
-        .map_or_else(
-            || Err(anyhow!("No content found in response {}", response_json)),
-            |content| Ok(content.to_string()),
-        )?;
-
-    let parsed_response: VisionData = serde_json::from_str(&json_response)?;
-    print_gpt_pricing("Visioned image", &response_json);
 
     Ok(parsed_response)
 }

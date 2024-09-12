@@ -159,7 +159,7 @@ pub async fn smartget() -> impl IntoResponse {
                 .iter()
                 .filter(|(_, wallpaper)| {
                     matches!(wallpaper.liked_state, LikedState::Liked)
-                        && wallpaper.vision_data.time_of_day == time_of_day
+                        && wallpaper.prompt_data.time_of_day == time_of_day
                 })
                 .map(|(_, wallpaper)| wallpaper.clone())
                 .collect::<Vec<_>>()
@@ -391,21 +391,13 @@ pub async fn generate_wallpaper_impl(
     // Calculate average color and brightness
     let color_data = calculate_color_data(&thumb_image);
 
-    // Get vision data
-    log::info!("Sending image result to gpt to classify");
-    let vision_data = gpt::vision_image(image).await?;
-    log::info!("Received image classification from gpt");
-
     let wallpaper = WallpaperData {
         id,
         datetime,
 
         prompt_data,
-        vision_data,
-
         original_file,
         upscaled_file: None,
-
         color_data,
 
         thumbnail_file,
@@ -625,9 +617,9 @@ async fn image_diffusion(
         "black-forest-labs/flux-schnell",
         &json!({
             "input": {
-                "prompt": prompt,
+                "prompt": format!("{prompt}, no signature or watermark"),
                 "num_outputs": 1,
-                "aspect_ratio": "3:2",
+                "aspect_ratio": "16:9",
                 "output_format": "png",
                 "output_quality": 100
             }

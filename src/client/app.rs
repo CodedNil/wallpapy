@@ -3,7 +3,7 @@ use crate::{
         add_comment, edit_key_style, generate_wallpaper, get_database, like_image, login,
         recreate_image, remove_comment, remove_image,
     },
-    common::{Brightness, CommentData, Database, DatabaseObjectType, LikedState, WallpaperData},
+    common::{CommentData, Database, DatabaseObjectType, LikedState, WallpaperData},
     PORT,
 };
 use anyhow::Result;
@@ -165,23 +165,26 @@ impl Wallpapy {
             });
             if let Some(database) = &mut self.database {
                 ui.horizontal(|ui| {
-                    if ui.button("Update").clicked() {
+                    if TextEdit::multiline(&mut database.key_style)
+                        .desired_width(f32::INFINITY)
+                        .ui(ui)
+                        .changed()
+                    {
                         let toasts_store = self.toasts.clone();
-                        let network_store = self.network_data.clone();
-                        let ctx = ctx.clone();
                         edit_key_style(
                             &self.host,
                             &self.stored.auth_token,
                             database.key_style.trim(),
-                            move |result| {
-                                ctx.request_repaint();
-                                button_pressed_result(result, &network_store, &toasts_store, "");
+                            move |result| match result {
+                                Ok(()) => {}
+                                Err(e) => {
+                                    toasts_store
+                                        .lock()
+                                        .error(format!("Failed to update key style: {e}"));
+                                }
                             },
                         );
                     }
-                    TextEdit::singleline(&mut database.key_style)
-                        .desired_width(f32::INFINITY)
-                        .ui(ui);
                 });
             }
         });
@@ -233,39 +236,19 @@ impl Wallpapy {
                             self.toasts.lock().info("Prompt copied to clipboard");
                         });
                     }
-                    let vision = &wallpaper.vision_data;
                     ui.horizontal(|ui| {
-                        for color in &vision.key_colors {
-                            ui.label(
-                                RichText::new(color.name.clone())
-                                    .font(font_id.clone())
-                                    .background_color(slice_to_color32(color.rgb_values))
-                                    .color(Color32::WHITE)
-                                    .strong(),
-                            );
-                        }
                         ui.label(
-                            RichText::new(vision.brightness.to_string())
-                                .font(font_id.clone())
-                                .background_color(match vision.brightness {
-                                    Brightness::Dark => Color32::from_gray(0),
-                                    Brightness::Dim => Color32::from_gray(50),
-                                    Brightness::Neutral => Color32::from_gray(100),
-                                    Brightness::Bright => Color32::from_gray(150),
-                                    Brightness::Light => Color32::from_gray(200),
-                                })
-                                .color(Color32::WHITE)
-                                .strong(),
+                            RichText::new(format!(
+                                "{} {}",
+                                wallpaper.prompt_data.time_of_day, wallpaper.prompt_data.season,
+                            ))
+                            .font(font_id.clone())
+                            .background_color(Color32::DARK_GRAY)
+                            .color(Color32::WHITE)
+                            .strong(),
                         );
                         ui.label(
-                            RichText::new(format!("{} {}", vision.time_of_day, vision.season,))
-                                .font(font_id.clone())
-                                .background_color(Color32::DARK_GRAY)
-                                .color(Color32::WHITE)
-                                .strong(),
-                        );
-                        ui.label(
-                            RichText::new(vec_str(&vision.color_palette))
+                            RichText::new(vec_str(&wallpaper.prompt_data.color_palette))
                                 .font(font_id.clone())
                                 .background_color(Color32::DARK_GRAY)
                                 .color(Color32::WHITE)
@@ -274,25 +257,24 @@ impl Wallpapy {
                     });
                     ui.horizontal(|ui| {
                         ui.label(
-                            RichText::new(format!("Mood: {}", vec_str(&vision.image_mood)))
-                                .font(font_id.clone())
-                                .background_color(Color32::DARK_GRAY)
-                                .color(Color32::WHITE)
-                                .strong(),
+                            RichText::new(format!(
+                                "Mood: {}",
+                                vec_str(&wallpaper.prompt_data.image_mood)
+                            ))
+                            .font(font_id.clone())
+                            .background_color(Color32::DARK_GRAY)
+                            .color(Color32::WHITE)
+                            .strong(),
                         );
                         ui.label(
-                            RichText::new(format!("Tags: {}", vec_str(&vision.tags)))
-                                .font(font_id.clone())
-                                .background_color(Color32::DARK_GRAY)
-                                .color(Color32::WHITE)
-                                .strong(),
-                        );
-                        ui.label(
-                            RichText::new(format!("Subject: {}", vec_str(&vision.subject_matter)))
-                                .font(font_id.clone())
-                                .background_color(Color32::DARK_GRAY)
-                                .color(Color32::WHITE)
-                                .strong(),
+                            RichText::new(format!(
+                                "Subject: {}",
+                                vec_str(&wallpaper.prompt_data.subject_matter)
+                            ))
+                            .font(font_id.clone())
+                            .background_color(Color32::DARK_GRAY)
+                            .color(Color32::WHITE)
+                            .strong(),
                         );
                     });
                 });
@@ -795,7 +777,6 @@ impl Wallpapy {
         match &network_data_guard.get_database {
             GetDatabaseState::InProgress | GetDatabaseState::None => {}
             GetDatabaseState::Wanted => {
-                log::info!("Fetching database");
                 ctx.request_repaint();
                 network_data_guard.get_database = GetDatabaseState::InProgress;
                 drop(network_data_guard);
@@ -918,10 +899,6 @@ fn button_pressed_result(
                 .error(format!("Failed to submit request: {e}"));
         }
     }
-}
-
-const fn slice_to_color32(rgb: [u8; 3]) -> Color32 {
-    Color32::from_rgb(rgb[0], rgb[1], rgb[2])
 }
 
 pub fn vec_str<T: Display>(items: &[T]) -> String {

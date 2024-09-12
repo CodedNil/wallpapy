@@ -17,8 +17,6 @@ pub struct WallpaperData {
     pub datetime: DateTime<Utc>,
 
     pub prompt_data: PromptData,
-    pub vision_data: VisionData,
-
     pub original_file: ImageFile,
     pub upscaled_file: Option<ImageFile>,
     pub color_data: ColorData,
@@ -46,21 +44,14 @@ pub struct ImageFile {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PromptData {
-    pub prompt: String,
-    pub shortened_prompt: String,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct VisionData {
     pub time_of_day: TimeOfDay,
     pub season: Season,
-
-    pub tags: Vec<String>,
     pub image_mood: Vec<ImageMood>,
-    pub brightness: Brightness,
     pub color_palette: Vec<ColorPalette>,
-    pub key_colors: Vec<Color>,
     pub subject_matter: Vec<SubjectMatter>,
+
+    pub prompt: String,
+    pub shortened_prompt: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -90,15 +81,6 @@ pub enum LikedState {
 }
 
 // Prompt enums
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, VariantNames, Display)]
-pub enum Brightness {
-    Dark,
-    Dim,
-    Neutral,
-    Bright,
-    Light,
-}
-
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, VariantNames, Display)]
 pub enum TimeOfDay {
     GoldenHour,
