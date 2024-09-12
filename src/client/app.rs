@@ -3,7 +3,7 @@ use crate::{
         add_comment, edit_key_style, generate_wallpaper, get_database, like_image, login,
         recreate_image, remove_comment, remove_image,
     },
-    common::{CommentData, Database, DatabaseObjectType, LikedState, WallpaperData},
+    common::{CommentData, Database, LikedState, WallpaperData},
     PORT,
 };
 use anyhow::Result;
@@ -195,177 +195,168 @@ impl Wallpapy {
             if ui.input(|i| i.key_pressed(Key::Escape)) {
                 self.fullscreen_image = None;
             }
-            // Display the fullscreen image if it exists
-            if let Some(wallpaper) = &self.fullscreen_image {
-                let file = wallpaper
-                    .upscaled_file
-                    .as_ref()
-                    .map_or(&wallpaper.original_file, |upscaled_file| upscaled_file);
-                ui.vertical(|ui| {
-                    Image::new(format!(
-                        "http://{}/wallpapers/{}",
-                        self.host, file.file_name
-                    ))
-                    .show_loading_spinner(false)
-                    .rounding(16.0)
-                    .ui(ui);
 
-                    let font_id = FontId::proportional(20.0);
-                    if ui
-                        .button(
-                            RichText::new(wallpaper.prompt_data.shortened_prompt.clone())
-                                .font(font_id.clone()),
-                        )
-                        .clicked()
-                    {
-                        ui.output_mut(|o: &mut egui::PlatformOutput| {
-                            o.copied_text
-                                .clone_from(&wallpaper.prompt_data.shortened_prompt);
-                            self.toasts.lock().info("Text copied to clipboard");
+            let refresh_response = PullToRefresh::new(false).scroll_area_ui(ui, |ui| {
+                ScrollArea::vertical().show(ui, |ui| {
+                    // Display the fullscreen image if it exists
+                    if let Some(wallpaper) = &self.fullscreen_image {
+                        let file = wallpaper
+                            .upscaled_file
+                            .as_ref()
+                            .map_or(&wallpaper.original_file, |upscaled_file| upscaled_file);
+                        ui.vertical(|ui| {
+                            Image::new(format!(
+                                "http://{}/wallpapers/{}",
+                                self.host, file.file_name
+                            ))
+                            .show_loading_spinner(false)
+                            .rounding(16.0)
+                            .ui(ui);
+
+                            let font_id = FontId::proportional(20.0);
+                            if ui
+                                .button(
+                                    RichText::new(wallpaper.prompt_data.shortened_prompt.clone())
+                                        .font(font_id.clone()),
+                                )
+                                .clicked()
+                            {
+                                ui.output_mut(|o: &mut egui::PlatformOutput| {
+                                    o.copied_text
+                                        .clone_from(&wallpaper.prompt_data.shortened_prompt);
+                                    self.toasts.lock().info("Text copied to clipboard");
+                                });
+                            }
+                            if ui
+                                .button(
+                                    RichText::new(wallpaper.prompt_data.prompt.clone())
+                                        .font(font_id.clone()),
+                                )
+                                .clicked()
+                            {
+                                ui.output_mut(|o: &mut egui::PlatformOutput| {
+                                    o.copied_text.clone_from(&wallpaper.prompt_data.prompt);
+                                    self.toasts.lock().info("Prompt copied to clipboard");
+                                });
+                            }
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{} {}",
+                                        wallpaper.prompt_data.time_of_day,
+                                        wallpaper.prompt_data.season,
+                                    ))
+                                    .font(font_id.clone())
+                                    .background_color(Color32::DARK_GRAY)
+                                    .color(Color32::WHITE)
+                                    .strong(),
+                                );
+                                ui.label(
+                                    RichText::new(vec_str(&wallpaper.prompt_data.color_palette))
+                                        .font(font_id.clone())
+                                        .background_color(Color32::DARK_GRAY)
+                                        .color(Color32::WHITE)
+                                        .strong(),
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "Mood: {}",
+                                        vec_str(&wallpaper.prompt_data.image_mood)
+                                    ))
+                                    .font(font_id.clone())
+                                    .background_color(Color32::DARK_GRAY)
+                                    .color(Color32::WHITE)
+                                    .strong(),
+                                );
+                                ui.label(
+                                    RichText::new(format!(
+                                        "Subject: {}",
+                                        vec_str(&wallpaper.prompt_data.subject_matter)
+                                    ))
+                                    .font(font_id.clone())
+                                    .background_color(Color32::DARK_GRAY)
+                                    .color(Color32::WHITE)
+                                    .strong(),
+                                );
+                            });
                         });
-                    }
-                    if ui
-                        .button(
-                            RichText::new(wallpaper.prompt_data.prompt.clone())
-                                .font(font_id.clone()),
-                        )
-                        .clicked()
-                    {
-                        ui.output_mut(|o: &mut egui::PlatformOutput| {
-                            o.copied_text.clone_from(&wallpaper.prompt_data.prompt);
-                            self.toasts.lock().info("Prompt copied to clipboard");
-                        });
-                    }
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(format!(
-                                "{} {}",
-                                wallpaper.prompt_data.time_of_day, wallpaper.prompt_data.season,
-                            ))
-                            .font(font_id.clone())
-                            .background_color(Color32::DARK_GRAY)
-                            .color(Color32::WHITE)
-                            .strong(),
-                        );
-                        ui.label(
-                            RichText::new(vec_str(&wallpaper.prompt_data.color_palette))
-                                .font(font_id.clone())
-                                .background_color(Color32::DARK_GRAY)
-                                .color(Color32::WHITE)
-                                .strong(),
-                        );
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(format!(
-                                "Mood: {}",
-                                vec_str(&wallpaper.prompt_data.image_mood)
-                            ))
-                            .font(font_id.clone())
-                            .background_color(Color32::DARK_GRAY)
-                            .color(Color32::WHITE)
-                            .strong(),
-                        );
-                        ui.label(
-                            RichText::new(format!(
-                                "Subject: {}",
-                                vec_str(&wallpaper.prompt_data.subject_matter)
-                            ))
-                            .font(font_id.clone())
-                            .background_color(Color32::DARK_GRAY)
-                            .color(Color32::WHITE)
-                            .strong(),
-                        );
-                    });
-                });
 
-                // Handle left and right arrow key press
-                let left_pressed =
-                    ui.input(|i| i.key_pressed(Key::ArrowLeft) || i.key_pressed(Key::A));
-                let right_pressed =
-                    ui.input(|i| i.key_pressed(Key::ArrowRight) || i.key_pressed(Key::D));
-                if (left_pressed || right_pressed) && self.database.is_some() {
-                    let mut target_datetime = None;
-                    let mut target_wallpaper = None;
+                        // Handle left and right arrow key press
+                        let left_pressed =
+                            ui.input(|i| i.key_pressed(Key::ArrowLeft) || i.key_pressed(Key::A));
+                        let right_pressed =
+                            ui.input(|i| i.key_pressed(Key::ArrowRight) || i.key_pressed(Key::D));
+                        if (left_pressed || right_pressed) && self.database.is_some() {
+                            let mut target_datetime = None;
+                            let mut target_wallpaper = None;
 
-                    let comparison = if left_pressed {
-                        |dt1, dt2| dt1 > dt2
-                    } else {
-                        |dt1, dt2| dt1 < dt2
-                    };
+                            let comparison = if left_pressed {
+                                |dt1, dt2| dt1 > dt2
+                            } else {
+                                |dt1, dt2| dt1 < dt2
+                            };
 
-                    for paper in self.database.as_ref().unwrap().wallpapers.values() {
-                        if comparison(paper.datetime, wallpaper.datetime)
-                            && (target_datetime.is_none()
-                                || comparison(target_datetime.unwrap(), paper.datetime))
-                        {
-                            target_datetime = Some(paper.datetime);
-                            target_wallpaper = Some(paper.clone());
-                        }
-                    }
-
-                    if let Some(target_wallpaper) = target_wallpaper {
-                        new_fullscreen = Some(target_wallpaper);
-                    }
-                }
-            } else if let Some(database) = &self.database {
-                // Collect the wallpapers and comments into a single list, sorted by datetime
-                let mut combined_list = database
-                    .wallpapers
-                    .values()
-                    .map(|wallpaper| {
-                        (
-                            wallpaper.datetime,
-                            DatabaseObjectType::Wallpaper(wallpaper.clone()),
-                        )
-                    })
-                    .chain(database.comments.values().map(|comment| {
-                        (
-                            comment.datetime,
-                            DatabaseObjectType::Comment(comment.clone()),
-                        )
-                    }))
-                    .collect::<Vec<_>>();
-                combined_list.sort_by_key(|(datetime, _)| *datetime);
-                let combined_list = combined_list;
-
-                let available_width = ui.available_width();
-                let spacing = ui.spacing().item_spacing;
-                let cell_width = 400.0;
-                let columns = (available_width / (cell_width + spacing.x))
-                    .floor()
-                    .max(1.0) as usize;
-                let cell_width =
-                    (columns as f32 - 1.0).mul_add(-spacing.x, available_width / columns as f32);
-                let cell_height = cell_width * 0.5625;
-
-                let refresh_response = PullToRefresh::new(false).scroll_area_ui(ui, |ui| {
-                    ScrollArea::vertical().show(ui, |ui| {
-                        ui.horizontal_wrapped(|ui| {
-                            for (_, data) in combined_list.iter().rev() {
-                                match data {
-                                    DatabaseObjectType::Wallpaper(image) => {
-                                        self.draw_wallpaper_box(ui, image, cell_width, cell_height);
-                                    }
-                                    DatabaseObjectType::Comment(comment) => {
-                                        self.draw_comment_box(
-                                            ui,
-                                            comment,
-                                            cell_width * 0.5,
-                                            cell_height,
-                                        );
-                                    }
+                            for paper in self.database.as_ref().unwrap().wallpapers.values() {
+                                if comparison(paper.datetime, wallpaper.datetime)
+                                    && (target_datetime.is_none()
+                                        || comparison(target_datetime.unwrap(), paper.datetime))
+                                {
+                                    target_datetime = Some(paper.datetime);
+                                    target_wallpaper = Some(paper.clone());
                                 }
                             }
-                        })
-                    })
-                });
-                if refresh_response.should_refresh() {
-                    self.network_data.lock().get_database = GetDatabaseState::Wanted;
-                    ui.ctx().forget_all_images();
-                    ui.ctx().clear_animations();
-                }
+
+                            if let Some(target_wallpaper) = target_wallpaper {
+                                new_fullscreen = Some(target_wallpaper);
+                            }
+                        }
+                    } else if let Some(database) = self.database.clone() {
+                        // Collect the wallpapers and comments into a single list, sorted by datetime
+                        let mut combined_list = database
+                            .wallpapers
+                            .values()
+                            .map(|wallpaper| (wallpaper.datetime, Some(wallpaper), None))
+                            .chain(
+                                database
+                                    .comments
+                                    .values()
+                                    .map(|comment| (comment.datetime, None, Some(comment))),
+                            )
+                            .collect::<Vec<_>>();
+                        combined_list.sort_by_key(|(datetime, _, _)| *datetime);
+                        let combined_list = combined_list;
+
+                        let available_width = ui.available_width();
+                        let spacing = ui.spacing().item_spacing;
+                        let cell_width = 400.0;
+                        let columns = (available_width / (cell_width + spacing.x))
+                            .floor()
+                            .max(1.0) as usize;
+                        let cell_width = (columns as f32 - 1.0)
+                            .mul_add(-spacing.x, available_width / columns as f32);
+                        let cell_height = cell_width * 0.5625;
+
+                        ui.horizontal_wrapped(|ui| {
+                            for (_, wallpaper, comment) in combined_list.iter().rev() {
+                                if let Some(wallpaper) = wallpaper {
+                                    self.draw_wallpaper_box(ui, wallpaper, cell_width, cell_height);
+                                }
+                                if let Some(comment) = comment {
+                                    self.draw_comment_box(ui, comment, cell_width, cell_height);
+                                }
+                            }
+                        });
+                    }
+                })
+            });
+            if refresh_response.should_refresh() {
+                self.network_data.lock().get_database = GetDatabaseState::Wanted;
+                ui.ctx().forget_all_images();
+                ui.ctx().clear_animations();
             }
+
             if new_fullscreen.is_some() {
                 self.fullscreen_image = new_fullscreen;
             }

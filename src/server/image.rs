@@ -58,9 +58,8 @@ pub async fn latest() -> impl IntoResponse {
         Ok(database) => {
             let latest_image = database
                 .wallpapers
-                .iter()
-                .max_by_key(|(_, wallpaper)| wallpaper.datetime)
-                .map(|(_, wallpaper)| wallpaper.clone());
+                .into_values()
+                .max_by_key(|wallpaper| wallpaper.datetime);
 
             if let Some(wallpaper) = latest_image {
                 let file_name = wallpaper.upscaled_file.as_ref().map_or_else(
@@ -100,9 +99,8 @@ pub async fn favourites() -> impl IntoResponse {
         Ok(database) => {
             let liked_image: Option<WallpaperData> = database
                 .wallpapers
-                .iter()
-                .filter(|(_, wallpaper)| matches!(wallpaper.liked_state, LikedState::Liked))
-                .map(|(_, wallpaper)| wallpaper.clone())
+                .into_values()
+                .filter(|wallpaper| matches!(wallpaper.liked_state, LikedState::Liked))
                 .collect::<Vec<_>>()
                 .choose(&mut rand::thread_rng())
                 .cloned();
@@ -156,12 +154,11 @@ pub async fn smartget() -> impl IntoResponse {
         Ok(database) => {
             let liked_image: Option<WallpaperData> = database
                 .wallpapers
-                .iter()
-                .filter(|(_, wallpaper)| {
+                .into_values()
+                .filter(|wallpaper| {
                     matches!(wallpaper.liked_state, LikedState::Liked)
                         && wallpaper.prompt_data.time_of_day == time_of_day
                 })
-                .map(|(_, wallpaper)| wallpaper.clone())
                 .collect::<Vec<_>>()
                 .choose(&mut rand::thread_rng())
                 .cloned();
@@ -238,7 +235,6 @@ pub async fn like(packet: Bytes) -> impl IntoResponse {
     let result: Result<WallpaperData> = async {
         let mut database = read_database().await?;
 
-        // Perform mutable operations on wallpaper here
         if let Some((_, wallpaper)) = database
             .wallpapers
             .iter_mut()
@@ -574,12 +570,10 @@ fn calculate_chroma_hsl(lightness: f32, saturation: f32) -> f32 {
 async fn remove_wallpaper_impl(packet: TokenUuidPacket) -> Result<()> {
     let mut database = read_database().await?;
 
-    // Retrieve the existing entry without holding mutable reference when not needed
-    let wallpaper = if let Some(wallpaper) = database.wallpapers.get(&packet.uuid) {
-        wallpaper.clone() // Clone the wallpaper to work with it and allow removing from the hashmap later
-    } else {
-        return Err(anyhow::anyhow!("No entry found for UUID"));
-    };
+    let wallpaper = database
+        .wallpapers
+        .get(&packet.uuid)
+        .ok_or_else(|| anyhow::anyhow!("No entry found for UUID"))?;
 
     // Remove all associated files
     let dir = Path::new("wallpapers");

@@ -1,6 +1,5 @@
 use crate::common::{
-    ColorPalette, Database, DatabaseObjectType, ImageMood, LikedState, PromptData, Season,
-    SubjectMatter, TimeOfDay,
+    ColorPalette, Database, ImageMood, LikedState, PromptData, Season, SubjectMatter, TimeOfDay,
 };
 use crate::server::{format_duration, read_database};
 use anyhow::{anyhow, Result};
@@ -102,31 +101,24 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
     // Collect the images and comments into a single list, sorted by datetime
     let mut database_history = database
         .wallpapers
-        .values()
-        .map(|wallpaper| {
-            (
-                wallpaper.datetime,
-                DatabaseObjectType::Wallpaper(wallpaper.clone()),
-            )
-        })
-        .chain(database.comments.values().map(|comment| {
-            (
-                comment.datetime,
-                DatabaseObjectType::Comment(comment.clone()),
-            )
-        }))
+        .into_values()
+        .map(|wallpaper| (wallpaper.datetime, Some(wallpaper), None))
+        .chain(
+            database
+                .comments
+                .into_values()
+                .map(|comment| (comment.datetime, None, Some(comment))),
+        )
         .collect::<Vec<_>>();
-    database_history.sort_by_key(|(datetime, _)| *datetime);
+    database_history.sort_by_key(|(datetime, _, _)| *datetime);
 
     let cur_time = Utc::now();
     let mut history_string = Vec::new();
-    let mut discarded_loves = Vec::new();
-    let mut discarded_likes = Vec::new();
-    let mut discarded_dislikes = Vec::new();
-    let mut discarded_others = Vec::new();
-    for (i, (date, data)) in database_history.iter().rev().enumerate() {
+    let (mut discarded_loves, mut discarded_likes, mut discarded_dislikes, mut discarded_others) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for (i, (date, wallpaper, comment)) in database_history.iter().rev().enumerate() {
         let datetime_text = format_duration(cur_time - date);
-        if let DatabaseObjectType::Wallpaper(wallpaper) = data {
+        if let Some(wallpaper) = wallpaper {
             if i < match wallpaper.liked_state {
                 LikedState::Loved => 30,
                 LikedState::Liked | LikedState::Disliked => 15,
@@ -160,7 +152,7 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
                 }
             }
         }
-        if let DatabaseObjectType::Comment(comment) = data {
+        if let Some(comment) = comment {
             if i < 10 {
                 history_string.push(format!(
                     "{datetime_text} - User commented: '{}'",
@@ -290,7 +282,7 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
                         },
                         "season": {
                             "type": "string",
-                            "description": "The season for the image, pick spring summer autumn or winter most of the time, pick other for magical scenes etc, and unknown if it is unclear e.g. set in space",
+                            "description": "The season for the image, pick spring summer autumn or winter most of the time, unless there is a good reason to pick other or unknown",
                             "enum": Season::VARIANTS
                         },
 
@@ -325,11 +317,11 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
                             "description": "A shortened version of the prompt, only including the image description, max 25 words",
                         },
                     },
-                "required": ["time_of_day", "season", "image_mood", "color_palette", "subject_matter", "prompt", "shortened_prompt"],
-                "additionalProperties": false
-            },
-            "strict": true
-          }
+                    "required": ["time_of_day", "season", "image_mood", "color_palette", "subject_matter", "prompt", "shortened_prompt"],
+                    "additionalProperties": false
+                },
+                "strict": true
+            }
         },
         "max_tokens": 4096
     });

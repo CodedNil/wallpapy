@@ -207,9 +207,3 @@ pub struct TokenUuidLikedPacket {
     pub uuid: Uuid,
     pub liked: LikedState,
 }
-
-#[derive(Serialize, Deserialize, Clone)]
-pub enum DatabaseObjectType {
-    Wallpaper(WallpaperData),
-    Comment(CommentData),
-}
