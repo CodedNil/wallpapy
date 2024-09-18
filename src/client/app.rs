@@ -18,6 +18,7 @@ use egui_thumbhash::ThumbhashImage;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::{fmt::Display, sync::Arc};
+use uuid::Uuid;
 
 nestify::nest! {
     pub struct Wallpapy {
@@ -25,7 +26,7 @@ nestify::nest! {
         toasts: Arc<Mutex<Toasts>>,
 
         database: Option<Database>,
-        fullscreen_image: Option<WallpaperData>,
+        fullscreen_image: Option<Uuid>,
 
         #>[derive(Deserialize, Serialize, Default)]
         #>[serde(default)]
@@ -199,7 +200,15 @@ impl Wallpapy {
             let refresh_response = PullToRefresh::new(false).scroll_area_ui(ui, |ui| {
                 ScrollArea::vertical().show(ui, |ui| {
                     // Display the fullscreen image if it exists
-                    if let Some(wallpaper) = &self.fullscreen_image {
+                    let wallpaper = self.fullscreen_image.as_ref().and_then(|id| {
+                        self.database.as_ref().and_then(|db| {
+                            db.wallpapers
+                                .iter()
+                                .find(|(wid, _)| *wid == id)
+                                .map(|(_, w)| w)
+                        })
+                    });
+                    if let Some(wallpaper) = &wallpaper {
                         let file = wallpaper
                             .upscaled_file
                             .as_ref()
@@ -309,7 +318,7 @@ impl Wallpapy {
                             }
 
                             if let Some(target_wallpaper) = target_wallpaper {
-                                new_fullscreen = Some(target_wallpaper);
+                                new_fullscreen = Some(target_wallpaper.id);
                             }
                         }
                     } else if let Some(database) = self.database.clone() {
@@ -662,7 +671,7 @@ impl Wallpapy {
             && !sub_button_hovered
             && ui.input(|i| i.pointer.button_clicked(PointerButton::Primary))
         {
-            self.fullscreen_image = Some(wallpaper.clone());
+            self.fullscreen_image = Some(wallpaper.id);
         }
     }
 

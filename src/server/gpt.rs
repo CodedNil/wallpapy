@@ -225,14 +225,14 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
             },
             {
                 "role": "system",
-                "content": format!("You are a wallpaper image description generator, describe a wallpaper image in a few sentences without new lines with concise language, prioritise users comments as feedback, aim for variety above all else, every image should be totally refreshing with nothing in common with the previous few, the overall style direction is '{}'", database.key_style)
+                "content": format!("You are a wallpaper image description generator, describe a wallpaper image within 6 words, describe in the simplest of terms without detail, prioritise users comments as feedback, aim for variety above all else, every image should be totally refreshing with nothing in common with the previous few, the overall style direction is '{}'", database.key_style)
             },
             {
                 "role": "user",
                 "content": format!("Create me a new image prompt, {}Prompt:", user_message)
             }
         ],
-        "max_tokens": 4096
+        "max_tokens": 60
     });
     let response = client
         .post("https://api.openai.com/v1/chat/completions")
@@ -263,11 +263,11 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
             },
             {
                 "role": "system",
-                "content": format!("You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines, follow the prompt guidelines for best results, the overall style direction is '{}' (include this in every prompt, not exact wording but the meaning)", database.key_style)
+                "content": format!("You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines, follow the prompt guidelines for best results, the overall style direction is '{}' (factor parts of this into designing the prompt such as saying 'don't include something' do not write that into the prompt, if it suggest a style then include the guiding style in every prompt, not exact wording but the meaning)", database.key_style)
             },
             {
                 "role": "user",
-                "content": format!("Create me a new image prompt from this description '{}' Prompt:", image_description)
+                "content": format!("Create me a new image prompt from this description (use this only as a guide not a strict command, expand on it, alter details etc as you see fit) '{}' Prompt:", image_description)
             }
         ],
         "response_format": {
@@ -325,7 +325,7 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
                 "strict": true
             }
         },
-        "max_tokens": 4096
+        "max_tokens": 512
     });
     let response = client
         .post("https://api.openai.com/v1/chat/completions")
