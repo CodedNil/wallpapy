@@ -30,8 +30,7 @@ pub async fn generate(packet: Bytes) -> impl IntoResponse {
             return StatusCode::BAD_REQUEST;
         }
     };
-    if !matches!(verify_token(&packet.token).await, Ok(true)) {
-        log::error!("Unauthorized generate_wallpaper request");
+    if !verify_token(&packet.token).await.unwrap_or(false) {
         return StatusCode::UNAUTHORIZED;
     }
 
@@ -200,12 +199,11 @@ pub async fn remove(packet: Bytes) -> impl IntoResponse {
     let packet: TokenUuidPacket = match bincode::deserialize(&packet) {
         Ok(packet) => packet,
         Err(e) => {
-            log::error!("Failed to deserialize remove_comment packet: {:?}", e);
+            log::error!("Failed to deserialize remove_image packet: {:?}", e);
             return StatusCode::BAD_REQUEST;
         }
     };
-    if !matches!(verify_token(&packet.token).await, Ok(true)) {
-        log::error!("Unauthorized remove_comment request");
+    if !verify_token(&packet.token).await.unwrap_or(false) {
         return StatusCode::UNAUTHORIZED;
     }
 
@@ -226,8 +224,7 @@ pub async fn like(packet: Bytes) -> impl IntoResponse {
             return StatusCode::BAD_REQUEST.into_response();
         }
     };
-    if !matches!(verify_token(&packet.token).await, Ok(true)) {
-        log::error!("Unauthorized like_image request");
+    if !verify_token(&packet.token).await.unwrap_or(false) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
 
@@ -281,36 +278,31 @@ pub async fn recreate(packet: Bytes) -> impl IntoResponse {
     let packet: TokenUuidPacket = match bincode::deserialize(&packet) {
         Ok(packet) => packet,
         Err(e) => {
-            log::error!("Failed to deserialize like_image packet: {:?}", e);
+            log::error!("Failed to deserialize recreate_image packet: {:?}", e);
             return StatusCode::BAD_REQUEST.into_response();
         }
     };
-    if !matches!(verify_token(&packet.token).await, Ok(true)) {
-        log::error!("Unauthorized like_image request");
+    if !verify_token(&packet.token).await.unwrap_or(false) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
 
     // Get the prompt
-    let result: Result<PromptData> = async {
-        let database = read_database().await?;
-        let (_, wallpaper) = database
-            .wallpapers
+    let prompt_data = match read_database().await.and_then(|db| {
+        db.wallpapers
             .iter()
             .find(|(id, _)| **id == packet.uuid)
-            .ok_or_else(|| anyhow::anyhow!("Image not found"))?;
-
-        Ok(wallpaper.prompt_data.clone())
-    }
-    .await;
-
-    match result {
-        Ok(prompt_data) => {
-            if (generate_wallpaper_impl(Some(prompt_data), None).await).is_err() {
-                log::error!("Failed to recreate image");
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            }
-            StatusCode::OK.into_response()
+            .map(|(_, wallpaper)| wallpaper.prompt_data.clone())
+            .ok_or_else(|| anyhow::anyhow!("Image not found"))
+    }) {
+        Ok(data) => data,
+        Err(e) => {
+            log::error!("Failed to retrieve prompt data: {:?}", e);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
+    };
+
+    match generate_wallpaper_impl(Some(prompt_data), None).await {
+        Ok(()) => StatusCode::OK.into_response(),
         Err(e) => {
             log::error!("Failed to recreate image: {:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -326,6 +318,9 @@ pub async fn generate_wallpaper_impl(
 
     let id = Uuid::new_v4();
     let datetime = Utc::now();
+    let client = Client::new();
+    let api_token =
+        env::var("REPLICATE_API_TOKEN").expect("REPLICATE_API_TOKEN environment variable not set");
 
     // Generate image prompt
     let prompt_data = if let Some(prompt_data) = prompt_data {
@@ -337,9 +332,6 @@ pub async fn generate_wallpaper_impl(
     };
 
     // Generate image
-    let client = Client::new();
-    let api_token =
-        env::var("REPLICATE_API_TOKEN").expect("REPLICATE_API_TOKEN environment variable not set");
     let (image_url, image) = image_diffusion(&client, &api_token, &prompt_data.prompt).await?;
     log::info!("Generated image: {}", &image_url);
 
@@ -572,28 +564,25 @@ async fn remove_wallpaper_impl(packet: TokenUuidPacket) -> Result<()> {
 
     let wallpaper = database
         .wallpapers
-        .get(&packet.uuid)
-        .ok_or_else(|| anyhow::anyhow!("No entry found for UUID"))?;
+        .remove(&packet.uuid)
+        .ok_or_else(|| anyhow!("No entry found for UUID"))?;
 
     // Remove all associated files
-    let dir = Path::new("wallpapers");
-    let file_path = dir.join(&wallpaper.original_file.file_name);
-    if file_path.exists() {
-        fs::remove_file(file_path).await?;
-    }
-    let file_path = dir.join(&wallpaper.thumbnail_file.file_name);
-    if file_path.exists() {
-        fs::remove_file(file_path).await?;
-    }
-    if let Some(upscaled_file) = &wallpaper.upscaled_file {
-        let upscaled_file = dir.join(&upscaled_file.file_name);
-        if upscaled_file.exists() {
-            fs::remove_file(upscaled_file).await?;
+    for file_name in vec![
+        Some(&wallpaper.original_file.file_name),
+        Some(&wallpaper.thumbnail_file.file_name),
+        wallpaper.upscaled_file.as_ref().map(|f| &f.file_name),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let file_path = Path::new("wallpapers").join(file_name);
+        if file_path.exists() {
+            fs::remove_file(file_path).await?;
         }
     }
 
-    // Remove the database entry
-    database.wallpapers.remove(&packet.uuid);
+    // Save the updated database
     write_database(&database).await?;
 
     Ok(())

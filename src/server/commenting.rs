@@ -12,8 +12,7 @@ pub async fn add(packet: Bytes) -> impl IntoResponse {
             return StatusCode::BAD_REQUEST;
         }
     };
-    if !matches!(verify_token(&packet.token).await, Ok(true)) {
-        log::error!("Unauthorized add_comment request");
+    if !verify_token(&packet.token).await.unwrap_or(false) {
         return StatusCode::UNAUTHORIZED;
     }
 
@@ -53,8 +52,7 @@ pub async fn remove(packet: Bytes) -> impl IntoResponse {
             return StatusCode::BAD_REQUEST;
         }
     };
-    if !matches!(verify_token(&packet.token).await, Ok(true)) {
-        log::error!("Unauthorized remove_comment request");
+    if !verify_token(&packet.token).await.unwrap_or(false) {
         return StatusCode::UNAUTHORIZED;
     }
 
@@ -83,8 +81,7 @@ pub async fn key_style(packet: Bytes) -> impl IntoResponse {
             return StatusCode::BAD_REQUEST;
         }
     };
-    if !matches!(verify_token(&packet.token).await, Ok(true)) {
-        log::error!("Unauthorized key_style request");
+    if !verify_token(&packet.token).await.unwrap_or(false) {
         return StatusCode::UNAUTHORIZED;
     }
 

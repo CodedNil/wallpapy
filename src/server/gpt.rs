@@ -4,8 +4,7 @@ use crate::common::{
 use crate::server::{format_duration, read_database};
 use anyhow::{anyhow, Result};
 use chrono::Utc;
-use rand::seq::SliceRandom;
-use rand::Rng;
+use rand::prelude::*;
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -205,10 +204,13 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
             if random_number == 1 {
                 String::new()
             } else {
-                format!(
-                    "at {}, ",
-                    TimeOfDay::VARIANTS.choose(&mut rand::thread_rng()).unwrap()
-                )
+                let random_value = rand::thread_rng().gen_range(0.0..1.0);
+                let time_of_day = match random_value {
+                    x if x < 0.7 => "during the day",
+                    x if x < 0.85 => "at golden hour",
+                    _ => "at night",
+                };
+                format!("{time_of_day}, ")
             }
         },
         |message| format!("'{message}', "),
