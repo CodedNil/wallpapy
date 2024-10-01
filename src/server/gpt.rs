@@ -80,11 +80,7 @@ Design a mythical creature that combines elements of a lion, an eagle, and a dra
 Create an abstract representation of the emotion 'hope' using a palette of warm colors. Incorporate flowing shapes and subtle human silhouettes to suggest a sense of movement and aspiration
 ";
 
-pub async fn generate_prompt(
-    client: &Client,
-    api_key: &str,
-    message: Option<String>,
-) -> Result<(Value, String)> {
+pub async fn generate_prompt(client: &Client, api_key: &str) -> Result<(String, String)> {
     // Read the database
     let database = match read_database().await {
         Ok(db) => db,
@@ -125,7 +121,7 @@ pub async fn generate_prompt(
                 LikedState::None => 10,
             } {
                 history_string.push(format!(
-                    "{datetime_text} ago - Wallpaper created{} '{}'",
+                    "{datetime_text} ago -{} '{}'",
                     match wallpaper.liked_state {
                         LikedState::Loved => " (user LOVED this)",
                         LikedState::Liked => " (user liked this)",
@@ -134,7 +130,7 @@ pub async fn generate_prompt(
                     },
                     wallpaper.prompt_data.shortened_prompt
                 ));
-            } else {
+            } else if i < 60 {
                 let text = wallpaper.prompt_data.shortened_prompt.clone();
                 match wallpaper.liked_state {
                     LikedState::Loved => {
@@ -169,7 +165,7 @@ pub async fn generate_prompt(
             {
                 "role": "user",
                 "content": format!(
-                    "Summarise this history of image descriptions, taking out just the key concepts to create 3 comma separated lists of them without new lines, do not include common things like seasons, time of day etc, and do not repeat similar items, ideally 1 word per item, max 3 words per item if needed\nExample output: (user LOVED: item, item) (user liked: item, item, item) (user disliked: item, item) (others: item, item)\n\nLoved items: {}\nLiked items: {}\nDisliked items: {}\nOther items: {}\nOutput:",
+                    "Summarise this history of image descriptions, taking out just the key concepts to create 3 comma separated lists of them without new lines, do not include common things like seasons, time of day etc, do not repeat similar items and err on the side of fewer items, ideally 1 word per item, max 3 words per item if needed\nExample output: (user LOVED: item, item) (user liked: item, item, item) (user disliked: item, item) (others: item, item)\n\nLoved items: {}\nLiked items: {}\nDisliked items: {}\nOther items: {}\nOutput:",
                     discarded_loves.join(", "),
                     discarded_likes.join(", "),
                     discarded_dislikes.join(", "),
@@ -177,7 +173,7 @@ pub async fn generate_prompt(
                 )
             }
         ],
-        "max_tokens": 4096
+        "max_completion_tokens": 512
     });
     let response = client
         .post("https://api.openai.com/v1/chat/completions")
@@ -195,10 +191,18 @@ pub async fn generate_prompt(
             |content| Ok(content.to_string()),
         )?;
     print_gpt_pricing("Summarised discarded items", &response_json);
-    history_string.push(format!("Summary of older history: {discarded_summary}"));
+    history_string.push(format!("\n\nSummary of older history: {discarded_summary}"));
 
     // Create the image description
     let history_string = history_string.join("\n");
+
+    Ok((history_string, database.key_style))
+}
+
+pub async fn generate(message: Option<String>) -> Result<PromptData> {
+    let client = Client::new();
+    let api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
+
     let user_message = message.map_or_else(
         || {
             let random_number = rand::thread_rng().gen_range(1..=3);
@@ -216,6 +220,8 @@ pub async fn generate_prompt(
         },
         |message| format!("'{message}', "),
     );
+
+    let (history_string, key_style) = generate_prompt(&client, &api_key).await?;
     let request_body = json!({
         "model": "gpt-4o-2024-08-06",
         "messages": [
@@ -226,24 +232,17 @@ pub async fn generate_prompt(
             },
             {
                 "role": "system",
-                "content": format!("You are a wallpaper image description generator, describe a wallpaper image within 6 words, describe in the simplest of terms without detail, prioritise users comments as feedback, aim for variety above all else, every image should be totally refreshing with nothing in common with the previous few, the overall style direction is '{}'", database.key_style)
+                "content": format!("You are a wallpaper image description generator, describe a wallpaper image within 10 words, describe in the simplest of terms without detail, prioritise users comments as feedback, aim for variety above all else, every image should be totally refreshing with nothing in common with the previous few, the overall style direction is '{}'", key_style)
             },
             {
                 "role": "user",
                 "content": format!("Create me a new image prompt, {}Prompt:", user_message)
             }
         ],
-        "max_tokens": 60
+        "max_completion_tokens": 60,
+        "temperature": 1.4,
+        "presence_penalty": 0.6
     });
-
-    Ok((request_body, database.key_style))
-}
-
-pub async fn generate(message: Option<String>) -> Result<PromptData> {
-    let client = Client::new();
-    let api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
-
-    let (request_body, key_style) = generate_prompt(&client, &api_key, message).await?;
     let response = client
         .post("https://api.openai.com/v1/chat/completions")
         .header("Content-Type", "application/json")
@@ -335,7 +334,7 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
                 "strict": true
             }
         },
-        "max_tokens": 512
+        "max_completion_tokens": 512
     });
     let response = client
         .post("https://api.openai.com/v1/chat/completions")

@@ -162,16 +162,11 @@ impl Wallpapy {
 
                 // Debug button that prints the prompt to console
                 if ui.button("Query Prompt").clicked() {
-                    query_prompt(
-                        &self.host,
-                        &self.stored.auth_token,
-                        self.comment_submission.trim(),
-                        move |result| {
-                            if let Ok(prompt) = result {
-                                log::info!("{prompt}");
-                            }
-                        },
-                    );
+                    query_prompt(&self.host, &self.stored.auth_token, move |result| {
+                        if let Ok(prompt) = result {
+                            log::info!("{prompt}");
+                        }
+                    });
                 }
 
                 if ui.button("Logout").clicked() {

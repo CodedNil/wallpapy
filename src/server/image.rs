@@ -605,7 +605,7 @@ async fn image_diffusion(
             "input": {
                 "prompt": format!("{prompt}, no signature or watermark"),
                 "num_outputs": 1,
-                "aspect_ratio": "16:9",
+                "aspect_ratio": "3:2",
                 "output_format": "png",
                 "output_quality": 100
             }

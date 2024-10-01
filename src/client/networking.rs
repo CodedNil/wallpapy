@@ -1,5 +1,6 @@
 use crate::common::{
-    Database, LikedState, LoginPacket, TokenStringPacket, TokenUuidLikedPacket, TokenUuidPacket,
+    Database, LikedState, LoginPacket, TokenPacket, TokenStringPacket, TokenUuidLikedPacket,
+    TokenUuidPacket,
 };
 use anyhow::Result;
 use uuid::Uuid;
@@ -213,15 +214,13 @@ pub fn edit_key_style(
 pub fn query_prompt(
     host: &str,
     token: &str,
-    message: &str,
     on_done: impl 'static + Send + FnOnce(Result<String>),
 ) {
     ehttp::fetch(
         ehttp::Request::post(
             format!("http://{host}/queryprompt"),
-            bincode::serialize(&TokenStringPacket {
+            bincode::serialize(&TokenPacket {
                 token: token.to_string(),
-                string: message.to_string(),
             })
             .unwrap(),
         ),
