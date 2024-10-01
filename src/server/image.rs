@@ -4,8 +4,11 @@ use crate::common::{
 };
 use crate::server::{auth::verify_token, gpt, read_database, write_database};
 use anyhow::{anyhow, Result};
-use axum::http::{HeaderMap, HeaderValue};
-use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
+use axum::{
+    body::Bytes,
+    http::{HeaderMap, HeaderValue, StatusCode},
+    response::IntoResponse,
+};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chrono::{Timelike, Utc};
 use image::codecs::jpeg::JpegEncoder;

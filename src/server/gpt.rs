@@ -80,10 +80,11 @@ Design a mythical creature that combines elements of a lion, an eagle, and a dra
 Create an abstract representation of the emotion 'hope' using a palette of warm colors. Incorporate flowing shapes and subtle human silhouettes to suggest a sense of movement and aspiration
 ";
 
-pub async fn generate(message: Option<String>) -> Result<PromptData> {
-    let client = Client::new();
-    let api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
-
+pub async fn generate_prompt(
+    client: &Client,
+    api_key: &str,
+    message: Option<String>,
+) -> Result<(Value, String)> {
     // Read the database
     let database = match read_database().await {
         Ok(db) => db,
@@ -234,6 +235,15 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
         ],
         "max_tokens": 60
     });
+
+    Ok((request_body, database.key_style))
+}
+
+pub async fn generate(message: Option<String>) -> Result<PromptData> {
+    let client = Client::new();
+    let api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
+
+    let (request_body, key_style) = generate_prompt(&client, &api_key, message).await?;
     let response = client
         .post("https://api.openai.com/v1/chat/completions")
         .header("Content-Type", "application/json")
@@ -263,7 +273,7 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
             },
             {
                 "role": "system",
-                "content": format!("You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines, follow the prompt guidelines for best results, the overall style direction is '{}' (factor parts of this into designing the prompt such as saying 'don't include something' do not write that into the prompt, if it suggest a style then include the guiding style in every prompt, not exact wording but the meaning)", database.key_style)
+                "content": format!("You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines, follow the prompt guidelines for best results, the overall style direction is '{}' (factor parts of this into designing the prompt such as saying 'don't include something' do not write that into the prompt, if it suggest a style then include the guiding style in every prompt, not exact wording but the meaning)", key_style)
             },
             {
                 "role": "user",

@@ -19,7 +19,7 @@ pub fn login(
             })
             .unwrap(),
         ),
-        Box::new(move |res: std::result::Result<ehttp::Response, String>| {
+        Box::new(move |res: Result<ehttp::Response, String>| {
             on_done(match res {
                 Ok(res) => {
                     if res.status == 200 {
@@ -63,7 +63,7 @@ pub fn generate_wallpaper(
 pub fn get_database(host: &str, on_done: impl 'static + Send + FnOnce(Result<Database>)) {
     ehttp::fetch(
         ehttp::Request::get(format!("http://{host}/get")),
-        Box::new(move |res: std::result::Result<ehttp::Response, String>| {
+        Box::new(move |res: Result<ehttp::Response, String>| {
             on_done(match res {
                 Ok(res) => {
                     if res.status == 200 {
@@ -206,6 +206,41 @@ pub fn edit_key_style(
         ),
         Box::new(move |_| {
             on_done(Ok(()));
+        }),
+    );
+}
+
+pub fn query_prompt(
+    host: &str,
+    token: &str,
+    message: &str,
+    on_done: impl 'static + Send + FnOnce(Result<String>),
+) {
+    ehttp::fetch(
+        ehttp::Request::post(
+            format!("http://{host}/queryprompt"),
+            bincode::serialize(&TokenStringPacket {
+                token: token.to_string(),
+                string: message.to_string(),
+            })
+            .unwrap(),
+        ),
+        Box::new(move |res: Result<ehttp::Response, String>| {
+            on_done(match res {
+                Ok(res) => {
+                    if res.status == 200 {
+                        res.text()
+                            .map(std::string::ToString::to_string)
+                            .ok_or_else(|| anyhow::anyhow!("Failed to extract text from response"))
+                    } else {
+                        Err(anyhow::anyhow!(
+                            "Querying prompt failed {}",
+                            res.text().unwrap_or_default()
+                        ))
+                    }
+                }
+                Err(e) => Err(anyhow::anyhow!("Querying prompt failed {}", e)),
+            });
         }),
     );
 }

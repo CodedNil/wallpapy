@@ -22,6 +22,7 @@ pub fn setup_routes(app: Router) -> Router {
         .route("/imageremove", post(image::remove))
         .route("/imagerecreate", post(image::recreate))
         .route("/keystyle", post(commenting::key_style))
+        .route("/queryprompt", post(commenting::query_prompt))
 }
 
 pub async fn get_database() -> impl IntoResponse {
