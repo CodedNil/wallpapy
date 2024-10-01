@@ -335,7 +335,8 @@ pub async fn generate_wallpaper_impl(
     };
 
     // Generate image
-    let (image_url, image) = image_diffusion(&client, &api_token, &prompt_data.prompt).await?;
+    let (image_url, image, finetune) =
+        image_diffusion(&client, &api_token, &prompt_data.prompt).await?;
     log::info!("Generated image: {}", &image_url);
 
     // Resize the image to thumbnail
@@ -387,6 +388,7 @@ pub async fn generate_wallpaper_impl(
         datetime,
 
         prompt_data,
+        finetune,
         original_file,
         upscaled_file: None,
         color_data,
@@ -596,18 +598,43 @@ async fn image_diffusion(
     client: &Client,
     api_token: &str,
     prompt: &str,
-) -> Result<(String, DynamicImage)> {
+) -> Result<(String, DynamicImage, String)> {
+    let (version, trigger) = [
+        (
+            "2e8de10f217bc56da163a0204cf09f89995eaf643459014803fae79753183682",
+            "WHMSCPE001",
+        ),
+        (
+            "b761fa16918356ee07f31fad9b0d41d8919b9ff08f999e2d298a5a35b672f47e",
+            "BSstyle004",
+        ),
+        (
+            "846d1eb37059ed2ed268ff8dd4aa1531487fcdc3425a7a44c2a0a10723ef8383",
+            "TOK",
+        ),
+    ]
+    .choose(&mut rand::thread_rng())
+    .unwrap();
     let result_url = replicate_request_prediction(
         client,
         api_token,
-        "black-forest-labs/flux-schnell",
         &json!({
+            "version": version,
             "input": {
-                "prompt": format!("{prompt}, no signature or watermark"),
+                "prompt": format!("{prompt}, in the style of {trigger}"),
+                "model": "schnell",
+                "aspect_ratio": "custom",
+                "width": 1280,
+                "height": 800,
                 "num_outputs": 1,
-                "aspect_ratio": "3:2",
                 "output_format": "png",
-                "output_quality": 100
+                "output_quality": 100,
+                "lora_scale": 1,
+                "guidance_scale": 3.5,
+                "prompt_strength": 0.8,
+                "extra_lora_scale": 1,
+                "num_inference_steps": 25
+
             }
         }),
     )
@@ -618,7 +645,7 @@ async fn image_diffusion(
         .with_guessed_format()?
         .decode()?;
 
-    Ok((result_url, img))
+    Ok((result_url, img, (*trigger).to_string()))
 }
 
 /// <https://replicate.com/philz1337x/clarity-upscaler>
@@ -636,7 +663,6 @@ async fn upscale_image(
     let result_url = replicate_request_prediction(
         client,
         api_token,
-        "",
         &json!({
             "version": "dfad41707589d68ecdccd1dfa600d55a208f9310748e44bfe35b4a6291453d5e",
             "input": {
@@ -669,16 +695,10 @@ async fn upscale_image(
 async fn replicate_request_prediction(
     client: &Client,
     api_token: &str,
-    model: &str,
     input_json: &serde_json::Value,
 ) -> Result<String> {
-    let url = if model.is_empty() {
-        "https://api.replicate.com/v1/predictions"
-    } else {
-        &format!("https://api.replicate.com/v1/models/{model}/predictions")
-    };
     let response = client
-        .post(url)
+        .post("https://api.replicate.com/v1/predictions")
         .header("Authorization", format!("Bearer {api_token}"))
         .header("Content-Type", "application/json")
         .json(input_json)

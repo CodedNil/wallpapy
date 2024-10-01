@@ -17,6 +17,8 @@ pub struct WallpaperData {
     pub datetime: DateTime<Utc>,
 
     pub prompt_data: PromptData,
+    #[serde(default)]
+    pub finetune: String, // What finetune model was used in the creation
     pub original_file: ImageFile,
     pub upscaled_file: Option<ImageFile>,
     pub color_data: ColorData,

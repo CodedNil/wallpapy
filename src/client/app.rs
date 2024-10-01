@@ -298,6 +298,13 @@ impl Wallpapy {
                                     .color(Color32::WHITE)
                                     .strong(),
                                 );
+                                ui.label(
+                                    RichText::new(format!("Finetune: {}", wallpaper.finetune))
+                                        .font(font_id.clone())
+                                        .background_color(Color32::DARK_GRAY)
+                                        .color(Color32::WHITE)
+                                        .strong(),
+                                );
                             });
                         });
 
