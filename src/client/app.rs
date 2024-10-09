@@ -7,6 +7,7 @@ use crate::{
     PORT,
 };
 use anyhow::Result;
+use bitflags::bitflags;
 use chrono::Local;
 use egui::{
     vec2, Align2, CentralPanel, Color32, Context, CursorIcon, FontId, Frame, Image, Key,
@@ -27,6 +28,7 @@ nestify::nest! {
 
         database: Option<Database>,
         fullscreen_image: Option<Uuid>,
+        state_filter: StateFilter,
 
         #>[derive(Deserialize, Serialize, Default)]
         #>[serde(default)]
@@ -59,6 +61,17 @@ nestify::nest! {
     }
 }
 
+bitflags! {
+    #[derive(Clone)]
+    pub struct StateFilter: u32 {
+        const LIKED    = 0b00001;
+        const LOVED    = 0b00010;
+        const COMMENT  = 0b00100;
+        const NEUTRAL  = 0b01000;
+        const DISLIKED = 0b10000;
+    }
+}
+
 impl Wallpapy {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let stored = cc.storage.map_or_else(StoredData::default, |storage| {
@@ -73,6 +86,7 @@ impl Wallpapy {
             toasts: Arc::new(Mutex::new(Toasts::default())),
             database: None,
             fullscreen_image: None,
+            state_filter: StateFilter::all(),
             stored,
             login_form: LoginForm {
                 username: String::new(),
@@ -172,6 +186,38 @@ impl Wallpapy {
                 if ui.button("Logout").clicked() {
                     self.stored.auth_token.clear();
                 }
+
+                // Filter buttons
+                render_statefilter_button(
+                    ui,
+                    &mut self.state_filter,
+                    StateFilter::LOVED,
+                    egui_phosphor::regular::HEART,
+                );
+                render_statefilter_button(
+                    ui,
+                    &mut self.state_filter,
+                    StateFilter::LIKED,
+                    egui_phosphor::regular::THUMBS_UP,
+                );
+                render_statefilter_button(
+                    ui,
+                    &mut self.state_filter,
+                    StateFilter::NEUTRAL,
+                    egui_phosphor::regular::ALIGN_CENTER_HORIZONTAL_SIMPLE,
+                );
+                render_statefilter_button(
+                    ui,
+                    &mut self.state_filter,
+                    StateFilter::DISLIKED,
+                    egui_phosphor::regular::THUMBS_DOWN,
+                );
+                render_statefilter_button(
+                    ui,
+                    &mut self.state_filter,
+                    StateFilter::COMMENT,
+                    egui_phosphor::regular::CHAT_TEXT,
+                );
             });
             if let Some(database) = &mut self.database {
                 ui.horizontal(|ui| {
@@ -342,11 +388,22 @@ impl Wallpapy {
                         let mut combined_list = database
                             .wallpapers
                             .values()
+                            .filter(|wallpaper| match wallpaper.liked_state {
+                                LikedState::Liked => self.state_filter.contains(StateFilter::LIKED),
+                                LikedState::Loved => self.state_filter.contains(StateFilter::LOVED),
+                                LikedState::Disliked => {
+                                    self.state_filter.contains(StateFilter::DISLIKED)
+                                }
+                                LikedState::None => {
+                                    self.state_filter.contains(StateFilter::NEUTRAL)
+                                }
+                            })
                             .map(|wallpaper| (wallpaper.datetime, Some(wallpaper), None))
                             .chain(
                                 database
                                     .comments
                                     .values()
+                                    .filter(|_| self.state_filter.contains(StateFilter::COMMENT))
                                     .map(|comment| (comment.datetime, None, Some(comment))),
                             )
                             .collect::<Vec<_>>();
@@ -914,6 +971,25 @@ fn button_pressed_result(
                 .lock()
                 .error(format!("Failed to submit request: {e}"));
         }
+    }
+}
+
+fn render_statefilter_button(
+    ui: &mut egui::Ui,
+    state: &mut StateFilter,
+    flag: StateFilter,
+    label: &str,
+) {
+    let is_active = state.contains(flag.clone());
+
+    let button = egui::Button::new(label).fill(if is_active {
+        egui::Color32::DARK_BLUE
+    } else {
+        egui::Color32::DARK_GRAY
+    });
+
+    if ui.add(button).clicked() {
+        state.toggle(flag);
     }
 }
 
