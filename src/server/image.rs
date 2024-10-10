@@ -366,7 +366,7 @@ pub async fn generate_wallpaper_impl(
     };
 
     // Downscale to 480p and save as thumbnail file
-    let thumb_image = image.resize_to_fill(854, 480, FilterType::Lanczos3);
+    let thumb_image = image.resize_to_fill(640, 360, FilterType::Lanczos3);
     let thumb_file_name = format!("{datetime_str}_thumb.webp");
     std::fs::write(
         dir.join(&thumb_file_name),
@@ -449,7 +449,7 @@ pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper: WallpaperData) -> Resul
     });
 
     // Downscale to 480p and save as thumbnail file
-    let thumb_image = upscaled_image.resize_to_fill(854, 480, FilterType::Lanczos3);
+    let thumb_image = upscaled_image.resize_to_fill(640, 360, FilterType::Lanczos3);
     let thumb_file_name = format!("{datetime_str}_thumb.webp");
     std::fs::write(
         dir.join(&thumb_file_name),
