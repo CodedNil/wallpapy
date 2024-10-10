@@ -850,16 +850,16 @@ impl Wallpapy {
         match &network_data_guard.get_database {
             GetDatabaseState::InProgress | GetDatabaseState::None => {}
             GetDatabaseState::Wanted => {
-                ctx.request_repaint();
                 network_data_guard.get_database = GetDatabaseState::InProgress;
                 drop(network_data_guard);
 
+                let ctx = ctx.clone();
                 get_database(&self.host, move |res| {
                     network_store.lock().get_database = GetDatabaseState::Done(res);
+                    ctx.request_repaint();
                 });
             }
             GetDatabaseState::Done(ref response) => {
-                ctx.request_repaint();
                 match response {
                     Ok(database) => {
                         self.database = Some(database.clone());
@@ -869,6 +869,8 @@ impl Wallpapy {
                     }
                 }
                 network_data_guard.get_database = GetDatabaseState::None;
+                drop(network_data_guard);
+                ctx.request_repaint();
             }
         }
     }
