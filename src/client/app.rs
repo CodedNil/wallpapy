@@ -115,10 +115,8 @@ impl eframe::App for Wallpapy {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         #[cfg(target_arch = "wasm32")]
         {
-            if self.host.is_empty() {
-                let web_info = &_frame.info().web_info;
-                self.host = web_info.location.host.clone();
-            }
+            let web_info = &_frame.info().web_info;
+            self.host = web_info.location.host.clone();
         }
 
         self.get_database(ctx);
