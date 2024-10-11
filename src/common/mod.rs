@@ -1,14 +1,20 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use strum_macros::{Display, VariantNames};
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Database {
-    pub key_style: String,
+    pub style: DatabaseStyle,
     pub wallpapers: HashMap<Uuid, WallpaperData>,
     pub comments: HashMap<Uuid, CommentData>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct DatabaseStyle {
+    pub style: String, // The style that should be included in every prompt, painted etc
+    pub contents: String, // What kind of prompts to create, epic fantasy etc
+    pub negative_contents: String, // What to avoid including in the prompt
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -17,8 +23,6 @@ pub struct WallpaperData {
     pub datetime: DateTime<Utc>,
 
     pub prompt_data: PromptData,
-    #[serde(default)]
-    pub finetune: String, // What finetune model was used in the creation
     pub original_file: ImageFile,
     pub upscaled_file: Option<ImageFile>,
     pub color_data: ColorData,
@@ -46,12 +50,6 @@ pub struct ImageFile {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PromptData {
-    pub time_of_day: TimeOfDay,
-    pub season: Season,
-    pub image_mood: Vec<ImageMood>,
-    pub color_palette: Vec<ColorPalette>,
-    pub subject_matter: Vec<SubjectMatter>,
-
     pub prompt: String,
     pub shortened_prompt: String,
 }
@@ -68,115 +66,12 @@ pub struct ColorData {
     pub contrast_ratio: f32,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct Color {
-    pub name: String,
-    pub rgb_values: [u8; 3],
-}
-
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum LikedState {
-    None,
+    Neutral,
     Disliked,
     Liked,
     Loved,
-}
-
-// Prompt enums
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, VariantNames, Display)]
-pub enum TimeOfDay {
-    GoldenHour,
-    Day,
-    Night,
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, VariantNames, Display)]
-pub enum ImageMood {
-    // Positive Moods
-    Joyful,
-    Hopeful,
-    Playful,
-    Energetic,
-    Triumphant,
-
-    // Neutral Moods
-    Reflective,
-    Whimsical,
-    Luminous,
-    Tranquil,
-
-    // Negative Moods
-    Melancholic,
-    Sombre,
-    Tense,
-    Foreboding,
-
-    // Dramatic and Mysterious Moods
-    Dramatic,
-    Mysterious,
-    Haunting,
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, VariantNames, Display)]
-pub enum ColorPalette {
-    // Temperature
-    Warm,
-    Neutral,
-    Cool,
-
-    // Style
-    Pastel,
-    Monochromatic,
-    Earthy,
-    Neon,
-    Sepia,
-
-    // Intensity
-    Vibrant,
-    Bold,
-    Subdued,
-
-    Other,
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, VariantNames, Display)]
-pub enum Season {
-    Spring,
-    Summer,
-    Autumn,
-    Winter,
-    Other,
-    Unknown,
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, VariantNames, Display)]
-pub enum SubjectMatter {
-    Narrative,
-    Historical,
-    Symbolic,
-    Abstract,
-
-    Landscape,
-    Seascape,
-
-    Nature,
-    Flora,
-    Fauna,
-
-    Fantasy,
-    Mythological,
-    Surreal,
-    Whimsical,
-    Celestial,
-    Space,
-
-    Cityscape,
-    Interior,
-    Industrial,
-    Technological,
-    Architectural,
-
-    Other,
 }
 
 // Network packets
@@ -208,4 +103,18 @@ pub struct TokenUuidLikedPacket {
     pub token: String,
     pub uuid: Uuid,
     pub liked: LikedState,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SetStylePacket {
+    pub token: String,
+    pub variant: StyleVariant,
+    pub string: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum StyleVariant {
+    Style,
+    Contents,
+    NegativeContents,
 }

@@ -1,6 +1,6 @@
 use crate::common::{
-    Database, LikedState, LoginPacket, TokenPacket, TokenStringPacket, TokenUuidLikedPacket,
-    TokenUuidPacket,
+    Database, LikedState, LoginPacket, SetStylePacket, StyleVariant, TokenPacket,
+    TokenStringPacket, TokenUuidLikedPacket, TokenUuidPacket,
 };
 use anyhow::Result;
 use uuid::Uuid;
@@ -190,17 +190,19 @@ pub fn recreate_image(
     );
 }
 
-pub fn edit_key_style(
+pub fn edit_styles(
     host: &str,
     token: &str,
+    variant: StyleVariant,
     new: &str,
     on_done: impl 'static + Send + FnOnce(Result<()>),
 ) {
     ehttp::fetch(
         ehttp::Request::post(
-            format!("http://{host}/keystyle"),
-            bincode::serialize(&TokenStringPacket {
+            format!("http://{host}/styles"),
+            bincode::serialize(&SetStylePacket {
                 token: token.to_string(),
+                variant,
                 string: new.to_string(),
             })
             .unwrap(),

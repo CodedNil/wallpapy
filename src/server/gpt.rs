@@ -1,15 +1,11 @@
-use crate::common::{
-    ColorPalette, Database, ImageMood, LikedState, PromptData, Season, SubjectMatter, TimeOfDay,
-};
+use crate::common::{Database, DatabaseStyle, LikedState, PromptData};
 use crate::server::{format_duration, read_database};
 use anyhow::{anyhow, Result};
 use chrono::Utc;
-use rand::prelude::*;
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::env;
-use strum::VariantNames;
 
 const PROMPT_GUIDELINES: &str = "A well-crafted FLUX.1 prompt typically includes the following components:
     Subject: The main focus of the image.
@@ -80,14 +76,14 @@ Design a mythical creature that combines elements of a lion, an eagle, and a dra
 Create an abstract representation of the emotion 'hope' using a palette of warm colors. Incorporate flowing shapes and subtle human silhouettes to suggest a sense of movement and aspiration
 ";
 
-pub async fn generate_prompt(client: &Client, api_key: &str) -> Result<(String, String)> {
+pub async fn generate_prompt(client: &Client, api_key: &str) -> Result<(String, DatabaseStyle)> {
     // Read the database
     let database = match read_database().await {
         Ok(db) => db,
         Err(e) => {
             log::error!("Failed accessing database {:?}", e);
             Database {
-                key_style: String::new(),
+                style: DatabaseStyle::default(),
                 wallpapers: HashMap::new(),
                 comments: HashMap::new(),
             }
@@ -118,7 +114,7 @@ pub async fn generate_prompt(client: &Client, api_key: &str) -> Result<(String, 
             if i < match wallpaper.liked_state {
                 LikedState::Loved => 30,
                 LikedState::Liked | LikedState::Disliked => 15,
-                LikedState::None => 10,
+                LikedState::Neutral => 10,
             } {
                 history_string.push(format!(
                     "{datetime_text} ago -{} '{}'",
@@ -126,7 +122,7 @@ pub async fn generate_prompt(client: &Client, api_key: &str) -> Result<(String, 
                         LikedState::Loved => " (user LOVED this)",
                         LikedState::Liked => " (user liked this)",
                         LikedState::Disliked => " (user disliked this)",
-                        LikedState::None => "",
+                        LikedState::Neutral => "",
                     },
                     wallpaper.prompt_data.shortened_prompt
                 ));
@@ -142,7 +138,7 @@ pub async fn generate_prompt(client: &Client, api_key: &str) -> Result<(String, 
                     LikedState::Disliked => {
                         discarded_dislikes.push(text);
                     }
-                    LikedState::None => {
+                    LikedState::Neutral => {
                         discarded_others.push(text);
                     }
                 }
@@ -196,34 +192,18 @@ pub async fn generate_prompt(client: &Client, api_key: &str) -> Result<(String, 
     // Create the image description
     let history_string = history_string.join("\n");
 
-    Ok((history_string, database.key_style))
+    Ok((history_string, database.style))
 }
 
 pub async fn generate(message: Option<String>) -> Result<PromptData> {
     let client = Client::new();
     let api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
 
-    let user_message = message.map_or_else(
-        || {
-            let random_number = rand::thread_rng().gen_range(1..=3);
-            if random_number == 1 {
-                String::new()
-            } else {
-                let random_value = rand::thread_rng().gen_range(0.0..1.0);
-                let time_of_day = match random_value {
-                    x if x < 0.7 => "during the day",
-                    x if x < 0.85 => "at golden hour",
-                    _ => "at night",
-                };
-                format!("{time_of_day}, ")
-            }
-        },
-        |message| format!("'{message}', "),
-    );
+    let user_message = message.map_or_else(String::new, |message| format!("'User messaged '{message}', this takes precedence over any previous comments and prompts', "));
 
-    let (history_string, key_style) = generate_prompt(&client, &api_key).await?;
+    let (history_string, style) = generate_prompt(&client, &api_key).await?;
     let request_body = json!({
-        "model": "gpt-4o-2024-08-06",
+        "model": "gpt-4o",
         "messages": [
             {
                 "role": "system",
@@ -232,7 +212,7 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
             },
             {
                 "role": "system",
-                "content": format!("You are a wallpaper image description generator, describe a wallpaper image within 10 words, describe in the simplest of terms without detail, prioritise users comments as feedback, aim for variety above all else, every image should be totally refreshing with nothing in common with the previous few, the overall style direction is '{}'", key_style)
+                "content": format!("You are a wallpaper image description generator, describe a wallpaper image within 10 words, describe in the simplest of terms without detail, prioritise users comments as feedback, aim for variety above all else, every image should be totally refreshing with nothing in common with the previous few, types of content to include (not exhaustive just take inspiration) '{}', never include anything '{}'", style.contents, style.negative_contents)
             },
             {
                 "role": "user",
@@ -272,11 +252,11 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
             },
             {
                 "role": "system",
-                "content": format!("You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines, follow the prompt guidelines for best results, the overall style direction is '{}' (factor parts of this into designing the prompt such as saying 'don't include something' do not write that into the prompt, if it suggest a style then include the guiding style in every prompt, not exact wording but the meaning)", key_style)
+                "content": format!("You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines, follow the prompt guidelines for best results, the overall style direction is '{}' (include the guiding style in every prompt, not exact wording but the meaning)", style.style)
             },
             {
                 "role": "user",
-                "content": format!("Create me a new image prompt from this description (use this only as a guide not a strict command, expand on it, alter details etc as you see fit) '{}' Prompt:", image_description)
+                "content": format!("Create me a new image prompt from this description (use this only as a guide not a strict command, expand on it, alter details etc as you see fit) '{}', {}Prompt:", image_description, user_message)
             }
         ],
         "response_format": {
@@ -286,55 +266,19 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
                 "schema": {
                     "type": "object",
                     "properties": {
-                        "time_of_day": {
-                            "type": "string",
-                            "description": "The time of day for the image",
-                            "enum": TimeOfDay::VARIANTS
-                        },
-                        "season": {
-                            "type": "string",
-                            "description": "The season for the image, pick spring summer autumn or winter most of the time, unless there is a good reason to pick other or unknown",
-                            "enum": Season::VARIANTS
-                        },
-
-                        "image_mood": {
-                            "type": "array",
-                            "description": "The moods for the image, max 3",
-                            "items": {
-                                "type": "string",
-                                "enum": ImageMood::VARIANTS
-                            }
-                        },
-                        "color_palette": {
-                            "type": "array",
-                            "description": "The color palette for the image, max 3",
-                            "items": {
-                                "type": "string",
-                                "enum": ColorPalette::VARIANTS
-                            }
-                        },
-                        "subject_matter": {
-                            "type": "array",
-                            "description":   "The subject matter for the image, max 3",
-                            "items": {
-                                "type": "string",
-                                "enum": SubjectMatter::VARIANTS
-                            }
-                        },
-
                         "prompt": { "type": "string" },
                         "shortened_prompt": {
                             "type": "string",
-                            "description": "A shortened version of the prompt, only including the image description, max 25 words",
+                            "description": "A shortened version of the prompt, only including the image description not style, max 25 words",
                         },
                     },
-                    "required": ["time_of_day", "season", "image_mood", "color_palette", "subject_matter", "prompt", "shortened_prompt"],
+                    "required": ["prompt", "shortened_prompt"],
                     "additionalProperties": false
                 },
                 "strict": true
             }
         },
-        "max_completion_tokens": 512
+        "max_completion_tokens": 256
     });
     let response = client
         .post("https://api.openai.com/v1/chat/completions")

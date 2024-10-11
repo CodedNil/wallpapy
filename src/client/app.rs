@@ -1,9 +1,9 @@
 use crate::{
     client::networking::{
-        add_comment, edit_key_style, generate_wallpaper, get_database, like_image, login,
+        add_comment, edit_styles, generate_wallpaper, get_database, like_image, login,
         query_prompt, recreate_image, remove_comment, remove_image,
     },
-    common::{CommentData, Database, LikedState, WallpaperData},
+    common::{CommentData, Database, LikedState, StyleVariant, WallpaperData},
     PORT,
 };
 use anyhow::Result;
@@ -18,7 +18,7 @@ use egui_pull_to_refresh::PullToRefresh;
 use egui_thumbhash::ThumbhashImage;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use std::{fmt::Display, sync::Arc};
+use std::sync::Arc;
 use uuid::Uuid;
 
 nestify::nest! {
@@ -81,6 +81,21 @@ impl Wallpapy {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         egui_thumbhash::register(&cc.egui_ctx);
 
+        #[cfg(target_arch = "wasm32")]
+        {
+            let web_info = &_frame.info().web_info;
+            self.host = web_info.location.host.clone();
+        }
+
+        cc.egui_ctx.style_mut(|style| {
+            style.visuals.window_shadow = egui::epaint::Shadow::NONE;
+            style.spacing.item_spacing = Vec2::new(8.0, 8.0);
+        });
+
+        let mut fonts = egui::FontDefinitions::default();
+        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+        cc.egui_ctx.set_fonts(fonts);
+
         Self {
             host: format!("localhost:{PORT}"),
             toasts: Arc::new(Mutex::new(Toasts::default())),
@@ -104,21 +119,6 @@ impl eframe::App for Wallpapy {
     }
 
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let web_info = &_frame.info().web_info;
-            self.host = web_info.location.host.clone();
-        }
-
-        ctx.style_mut(|style| {
-            style.visuals.window_shadow = egui::epaint::Shadow::NONE;
-            style.spacing.item_spacing = Vec2::new(8.0, 8.0);
-        });
-
-        let mut fonts = egui::FontDefinitions::default();
-        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
-        ctx.set_fonts(fonts);
-
         self.get_database(ctx);
         if self.stored.auth_token.is_empty() {
             self.show_login_panel(ctx);
@@ -221,22 +221,72 @@ impl Wallpapy {
             });
             if let Some(database) = &mut self.database {
                 ui.horizontal(|ui| {
-                    if TextEdit::multiline(&mut database.key_style)
+                    if TextEdit::multiline(&mut database.style.style)
                         .desired_width(f32::INFINITY)
+                        .hint_text("What styles of wallpapers should it aim for (painted, realistic, etc.)?")
                         .ui(ui)
                         .changed()
                     {
                         let toasts_store = self.toasts.clone();
-                        edit_key_style(
+                        edit_styles(
                             &self.host,
                             &self.stored.auth_token,
-                            database.key_style.trim(),
+                            StyleVariant::Style,
+                            database.style.style.trim(),
                             move |result| match result {
                                 Ok(()) => {}
                                 Err(e) => {
                                     toasts_store
                                         .lock()
-                                        .error(format!("Failed to update key style: {e}"));
+                                        .error(format!("Failed to update style: {e}"));
+                                }
+                            },
+                        );
+                    }
+                });
+                ui.horizontal(|ui| {
+                    if TextEdit::multiline(&mut database.style.contents)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("What contents of wallpapers should it aim for (epic fantasy, surreal, abstract, etc.)?")
+                        .ui(ui)
+                        .changed()
+                    {
+                        let toasts_store = self.toasts.clone();
+                        edit_styles(
+                            &self.host,
+                            &self.stored.auth_token,
+                            StyleVariant::Contents,
+                            database.style.contents.trim(),
+                            move |result| match result {
+                                Ok(()) => {}
+                                Err(e) => {
+                                    toasts_store
+                                        .lock()
+                                        .error(format!("Failed to update contents: {e}"));
+                                }
+                            },
+                        );
+                    }
+                });
+                ui.horizontal(|ui| {
+                    if TextEdit::multiline(&mut database.style.negative_contents)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("What should never be included in wallpapers?")
+                        .ui(ui)
+                        .changed()
+                    {
+                        let toasts_store = self.toasts.clone();
+                        edit_styles(
+                            &self.host,
+                            &self.stored.auth_token,
+                            StyleVariant::NegativeContents,
+                            database.style.negative_contents.trim(),
+                            move |result| match result {
+                                Ok(()) => {}
+                                Err(e) => {
+                                    toasts_store
+                                        .lock()
+                                        .error(format!("Failed to update negative contents: {e}"));
                                 }
                             },
                         );
@@ -306,50 +356,33 @@ impl Wallpapy {
                             ui.horizontal(|ui| {
                                 ui.label(
                                     RichText::new(format!(
-                                        "{} {}",
-                                        wallpaper.prompt_data.time_of_day,
-                                        wallpaper.prompt_data.season,
+                                        "Saturation {}%  Lightness {}%  Chroma {}%",
+                                        (wallpaper.color_data.saturation * 100.0) as i32,
+                                        (wallpaper.color_data.lightness * 100.0) as i32,
+                                        (wallpaper.color_data.chroma * 100.0) as i32
                                     ))
                                     .font(font_id.clone())
-                                    .background_color(Color32::DARK_GRAY)
-                                    .color(Color32::WHITE)
-                                    .strong(),
-                                );
-                                ui.label(
-                                    RichText::new(vec_str(&wallpaper.prompt_data.color_palette))
-                                        .font(font_id.clone())
-                                        .background_color(Color32::DARK_GRAY)
-                                        .color(Color32::WHITE)
-                                        .strong(),
-                                );
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    RichText::new(format!(
-                                        "Mood: {}",
-                                        vec_str(&wallpaper.prompt_data.image_mood)
+                                    .background_color(Color32::from_rgb(
+                                        (wallpaper.color_data.average_color.0 * 255.0) as u8,
+                                        (wallpaper.color_data.average_color.1 * 255.0) as u8,
+                                        (wallpaper.color_data.average_color.2 * 255.0) as u8,
                                     ))
-                                    .font(font_id.clone())
-                                    .background_color(Color32::DARK_GRAY)
                                     .color(Color32::WHITE)
                                     .strong(),
                                 );
                                 ui.label(
                                     RichText::new(format!(
-                                        "Subject: {}",
-                                        vec_str(&wallpaper.prompt_data.subject_matter)
+                                        "Top20 {}%  Bot20 {}%  Contrast {:.1}",
+                                        (wallpaper.color_data.top_20_percent_brightness * 100.0)
+                                            as i32,
+                                        (wallpaper.color_data.bottom_20_percent_brightness * 100.0)
+                                            as i32,
+                                        wallpaper.color_data.contrast_ratio
                                     ))
                                     .font(font_id.clone())
                                     .background_color(Color32::DARK_GRAY)
                                     .color(Color32::WHITE)
                                     .strong(),
-                                );
-                                ui.label(
-                                    RichText::new(format!("Finetune: {}", wallpaper.finetune))
-                                        .font(font_id.clone())
-                                        .background_color(Color32::DARK_GRAY)
-                                        .color(Color32::WHITE)
-                                        .strong(),
                                 );
                             });
                         });
@@ -394,7 +427,7 @@ impl Wallpapy {
                                 LikedState::Disliked => {
                                     self.state_filter.contains(StateFilter::DISLIKED)
                                 }
-                                LikedState::None => {
+                                LikedState::Neutral => {
                                     self.state_filter.contains(StateFilter::NEUTRAL)
                                 }
                             })
@@ -721,7 +754,7 @@ impl Wallpapy {
                 LikedState::Loved => Color32::from_rgb(170, 120, 10),
                 LikedState::Liked => Color32::from_rgb(40, 70, 40),
                 LikedState::Disliked => Color32::from_rgb(100, 20, 20),
-                LikedState::None => Color32::BLACK,
+                LikedState::Neutral => Color32::BLACK,
             }
             .gamma_multiply(if is_hovering { 1.0 } else { 0.9 }),
         ));
@@ -993,12 +1026,4 @@ fn render_statefilter_button(
     if ui.add(button).clicked() {
         state.toggle(flag);
     }
-}
-
-pub fn vec_str<T: Display>(items: &[T]) -> String {
-    items
-        .iter()
-        .map(|item| format!("{item}"))
-        .collect::<Vec<String>>()
-        .join(", ")
 }

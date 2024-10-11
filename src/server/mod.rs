@@ -1,4 +1,4 @@
-use crate::common::Database;
+use crate::common::{Database, DatabaseStyle};
 use anyhow::Result;
 use chrono::Duration;
 use std::collections::HashMap;
@@ -18,7 +18,7 @@ const DATABASE_FILE: &str = "database.ron";
 async fn read_database() -> Result<Database> {
     if fs::metadata(DATABASE_FILE).await.is_err() {
         return Ok(Database {
-            key_style: String::new(),
+            style: DatabaseStyle::default(),
             wallpapers: HashMap::new(),
             comments: HashMap::new(),
         });

@@ -1,6 +1,6 @@
 use crate::common::{
-    ColorData, ImageFile, LikedState, PromptData, TimeOfDay, TokenStringPacket,
-    TokenUuidLikedPacket, TokenUuidPacket, WallpaperData,
+    ColorData, ImageFile, LikedState, PromptData, TokenStringPacket, TokenUuidLikedPacket,
+    TokenUuidPacket, WallpaperData,
 };
 use crate::server::{auth::verify_token, gpt, read_database, write_database};
 use anyhow::{anyhow, Result};
@@ -144,12 +144,13 @@ pub async fn smartget() -> impl IntoResponse {
     let now = Utc::now();
     let hour = now.hour();
 
-    let time_of_day = if (hour > 6 && hour < 10) || hour > 19 && hour < 22 {
-        TimeOfDay::GoldenHour
-    } else if hour > 8 && hour < 20 {
-        TimeOfDay::Day
+    // Define acceptable brightness range based on the time of day.
+    let acceptable_brightness_range = if (hour > 6 && hour < 10) || hour > 19 && hour < 22 {
+        (0.2, 0.5)
+    } else if hour > 10 && hour < 16 {
+        (0.5, 1.0)
     } else {
-        TimeOfDay::Night
+        (0.0, 0.3)
     };
 
     match read_database().await {
@@ -158,8 +159,11 @@ pub async fn smartget() -> impl IntoResponse {
                 .wallpapers
                 .into_values()
                 .filter(|wallpaper| {
-                    matches!(wallpaper.liked_state, LikedState::Liked)
-                        && wallpaper.prompt_data.time_of_day == time_of_day
+                    matches!(wallpaper.liked_state, LikedState::Liked | LikedState::Loved)
+                        && (wallpaper.color_data.top_20_percent_brightness
+                            >= acceptable_brightness_range.0
+                            && wallpaper.color_data.top_20_percent_brightness
+                                <= acceptable_brightness_range.1)
                 })
                 .collect::<Vec<_>>()
                 .choose(&mut rand::thread_rng())
@@ -241,7 +245,7 @@ pub async fn like(packet: Bytes) -> impl IntoResponse {
             .find(|(id, _)| **id == packet.uuid)
         {
             if wallpaper.liked_state == packet.liked {
-                wallpaper.liked_state = LikedState::None;
+                wallpaper.liked_state = LikedState::Neutral;
             } else {
                 wallpaper.liked_state = packet.liked;
             }
@@ -335,8 +339,7 @@ pub async fn generate_wallpaper_impl(
     };
 
     // Generate image
-    let (image_url, image, finetune) =
-        image_diffusion(&client, &api_token, &prompt_data.prompt).await?;
+    let (image_url, image) = image_diffusion(&client, &api_token, &prompt_data.prompt).await?;
     log::info!("Generated image: {}", &image_url);
 
     // Resize the image to thumbnail
@@ -388,14 +391,13 @@ pub async fn generate_wallpaper_impl(
         datetime,
 
         prompt_data,
-        finetune,
         original_file,
         upscaled_file: None,
         color_data,
 
         thumbnail_file,
         thumbhash,
-        liked_state: LikedState::None,
+        liked_state: LikedState::Neutral,
     };
 
     // Store a new database entry
@@ -598,42 +600,20 @@ async fn image_diffusion(
     client: &Client,
     api_token: &str,
     prompt: &str,
-) -> Result<(String, DynamicImage, String)> {
-    let (version, trigger) = [
-        (
-            "2e8de10f217bc56da163a0204cf09f89995eaf643459014803fae79753183682",
-            "WHMSCPE001",
-        ),
-        (
-            "b761fa16918356ee07f31fad9b0d41d8919b9ff08f999e2d298a5a35b672f47e",
-            "BSstyle004",
-        ),
-        (
-            "846d1eb37059ed2ed268ff8dd4aa1531487fcdc3425a7a44c2a0a10723ef8383",
-            "TOK",
-        ),
-    ]
-    .choose(&mut rand::thread_rng())
-    .unwrap();
+) -> Result<(String, DynamicImage)> {
     let result_url = replicate_request_prediction(
         client,
         api_token,
+        "https://api.replicate.com/v1/models/black-forest-labs/flux-1.1-pro/predictions",
         &json!({
-            "version": version,
             "input": {
-                "prompt": format!("{prompt}, in the style of {trigger}"),
-                "model": "schnell",
-                "aspect_ratio": "custom",
+                "prompt": prompt,
                 "width": 1280,
                 "height": 800,
-                "num_outputs": 1,
+                "aspect_ratio": "custom",
                 "output_format": "png",
-                "output_quality": 100,
-                "lora_scale": 1,
-                "guidance_scale": 3.5,
-                "prompt_strength": 0.8,
-                "extra_lora_scale": 1,
-                "num_inference_steps": 25
+                "safety_tolerance": 2,
+                "prompt_upsampling": true
 
             }
         }),
@@ -645,7 +625,7 @@ async fn image_diffusion(
         .with_guessed_format()?
         .decode()?;
 
-    Ok((result_url, img, (*trigger).to_string()))
+    Ok((result_url, img))
 }
 
 /// <https://replicate.com/philz1337x/clarity-upscaler>
@@ -663,6 +643,7 @@ async fn upscale_image(
     let result_url = replicate_request_prediction(
         client,
         api_token,
+        "",
         &json!({
             "version": "dfad41707589d68ecdccd1dfa600d55a208f9310748e44bfe35b4a6291453d5e",
             "input": {
@@ -695,10 +676,16 @@ async fn upscale_image(
 async fn replicate_request_prediction(
     client: &Client,
     api_token: &str,
+    model: &str,
     input_json: &serde_json::Value,
 ) -> Result<String> {
+    let url = if model.is_empty() {
+        "https://api.replicate.com/v1/predictions"
+    } else {
+        model
+    };
     let response = client
-        .post("https://api.replicate.com/v1/predictions")
+        .post(url)
         .header("Authorization", format!("Bearer {api_token}"))
         .header("Content-Type", "application/json")
         .json(input_json)

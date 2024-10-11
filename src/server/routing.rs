@@ -21,7 +21,7 @@ pub fn setup_routes(app: Router) -> Router {
         .route("/imageliked", post(image::like))
         .route("/imageremove", post(image::remove))
         .route("/imagerecreate", post(image::recreate))
-        .route("/keystyle", post(commenting::key_style))
+        .route("/styles", post(commenting::styles))
         .route("/queryprompt", post(commenting::query_prompt))
 }
 

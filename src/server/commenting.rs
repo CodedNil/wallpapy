@@ -1,4 +1,6 @@
-use crate::common::{CommentData, TokenPacket, TokenStringPacket, TokenUuidPacket};
+use crate::common::{
+    CommentData, SetStylePacket, StyleVariant, TokenPacket, TokenStringPacket, TokenUuidPacket,
+};
 use crate::server::{auth::verify_token, gpt, read_database, write_database};
 use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
 use chrono::Utc;
@@ -73,11 +75,11 @@ pub async fn remove(packet: Bytes) -> impl IntoResponse {
     }
 }
 
-pub async fn key_style(packet: Bytes) -> impl IntoResponse {
-    let packet: TokenStringPacket = match bincode::deserialize(&packet) {
+pub async fn styles(packet: Bytes) -> impl IntoResponse {
+    let packet: SetStylePacket = match bincode::deserialize(&packet) {
         Ok(packet) => packet,
         Err(e) => {
-            log::error!("Failed to deserialize key_style packet: {:?}", e);
+            log::error!("Failed to deserialize styles packet: {:?}", e);
             return StatusCode::BAD_REQUEST;
         }
     };
@@ -87,7 +89,17 @@ pub async fn key_style(packet: Bytes) -> impl IntoResponse {
 
     let result = async {
         let mut database = read_database().await?;
-        database.key_style = packet.string;
+        match packet.variant {
+            StyleVariant::Style => {
+                database.style.style = packet.string;
+            }
+            StyleVariant::Contents => {
+                database.style.contents = packet.string;
+            }
+            StyleVariant::NegativeContents => {
+                database.style.negative_contents = packet.string;
+            }
+        }
         write_database(&database).await
     }
     .await;
@@ -95,7 +107,7 @@ pub async fn key_style(packet: Bytes) -> impl IntoResponse {
     match result {
         Ok(()) => StatusCode::OK,
         Err(e) => {
-            log::error!("Errored key_style {:?}", e);
+            log::error!("Errored styles {:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         }
     }
