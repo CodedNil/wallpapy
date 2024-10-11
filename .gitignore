@@ -1,6 +1,4 @@
 /target
-/wallpapers
 /dist
 .env
-database.ron
-auth.ron
+/data

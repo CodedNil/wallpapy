@@ -13,7 +13,7 @@ mod gpt;
 mod image;
 pub mod routing;
 
-const DATABASE_FILE: &str = "database.ron";
+const DATABASE_FILE: &str = "data/database.ron";
 
 async fn read_database() -> Result<Database> {
     if fs::metadata(DATABASE_FILE).await.is_err() {

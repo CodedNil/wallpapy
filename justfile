@@ -11,7 +11,7 @@ serve:
     cargo run --no-default-features --target-dir target/server
 
 serve-release:
-    cargo run --release --no-default-features --target-dir target/server
+    cargo run --no-default-features --target-dir target/server --release
 
 release:
     git pull

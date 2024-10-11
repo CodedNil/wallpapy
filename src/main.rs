@@ -16,15 +16,21 @@ mod client;
 mod server;
 
 pub static PORT: u16 = 4560;
+pub static WALLPAPERS_DIR: &str = "data/wallpapers";
 
 #[cfg(not(target_arch = "wasm32"))]
 #[tokio::main]
 async fn main() {
-    dotenvy::dotenv().ok();
+    if cfg!(debug_assertions) {
+        dotenvy::dotenv().ok();
+    }
     simple_logger::SimpleLogger::new()
         .with_level(log::LevelFilter::Info)
         .init()
         .unwrap();
+
+    // Make data dir if it doesn't exist
+    std::fs::create_dir_all(WALLPAPERS_DIR).unwrap();
 
     // Set up router
     let app = server::routing::setup_routes(
@@ -32,7 +38,7 @@ async fn main() {
             .nest_service("/", tower_http::services::ServeDir::new("dist"))
             .nest_service(
                 "/wallpapers",
-                tower_http::services::ServeDir::new("wallpapers"),
+                tower_http::services::ServeDir::new(WALLPAPERS_DIR),
             )
             .layer(tower_http::compression::CompressionLayer::new()),
     );

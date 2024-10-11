@@ -3,6 +3,7 @@ use crate::common::{
     TokenUuidPacket, WallpaperData,
 };
 use crate::server::{auth::verify_token, gpt, read_database, write_database};
+use crate::WALLPAPERS_DIR;
 use anyhow::{anyhow, Result};
 use axum::{
     body::Bytes,
@@ -69,7 +70,7 @@ pub async fn latest() -> impl IntoResponse {
                     |upscaled_file| upscaled_file.file_name.clone(),
                 );
 
-                let image_path = Path::new("wallpapers").join(&file_name);
+                let image_path = Path::new(WALLPAPERS_DIR).join(&file_name);
                 match fs::read(&image_path).await {
                     Ok(data) => {
                         let mime_type = mime_guess::from_path(&image_path).first_or_octet_stream();
@@ -113,7 +114,7 @@ pub async fn favourites() -> impl IntoResponse {
                     |upscaled_file| upscaled_file.file_name.clone(),
                 );
 
-                let image_path = Path::new("wallpapers").join(&file_name);
+                let image_path = Path::new(WALLPAPERS_DIR).join(&file_name);
                 match fs::read(&image_path).await {
                     Ok(data) => {
                         let mime_type = mime_guess::from_path(&image_path).first_or_octet_stream();
@@ -145,12 +146,12 @@ pub async fn smartget() -> impl IntoResponse {
     let hour = now.hour();
 
     // Define acceptable brightness range based on the time of day.
-    let acceptable_brightness_range = if (hour > 6 && hour < 10) || hour > 19 && hour < 22 {
-        (0.2, 0.5)
-    } else if hour > 10 && hour < 16 {
+    let acceptable_brightness_range = if (hour > 6 && hour < 10) || hour > 16 && hour < 22 {
+        (0.3, 0.6)
+    } else if (10..=16).contains(&hour) {
         (0.5, 1.0)
     } else {
-        (0.0, 0.3)
+        (0.0, 0.55)
     };
 
     match read_database().await {
@@ -175,7 +176,7 @@ pub async fn smartget() -> impl IntoResponse {
                     |upscaled_file| upscaled_file.file_name.clone(),
                 );
 
-                let image_path = Path::new("wallpapers").join(&file_name);
+                let image_path = Path::new(WALLPAPERS_DIR).join(&file_name);
                 match fs::read(&image_path).await {
                     Ok(data) => {
                         let mime_type = mime_guess::from_path(&image_path).first_or_octet_stream();
@@ -351,7 +352,7 @@ pub async fn generate_wallpaper_impl(
     );
 
     // Save to file
-    let dir = Path::new("wallpapers");
+    let dir = Path::new(WALLPAPERS_DIR);
     fs::create_dir_all(dir).await?;
 
     let datetime_str = datetime.to_rfc3339();
@@ -417,7 +418,7 @@ pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper: WallpaperData) -> Resul
         env::var("REPLICATE_API_TOKEN").expect("REPLICATE_API_TOKEN environment variable not set");
 
     // Open image file
-    let image_path = Path::new("wallpapers").join(wallpaper.original_file.file_name.clone());
+    let image_path = Path::new(WALLPAPERS_DIR).join(wallpaper.original_file.file_name.clone());
     let image = image::open(&image_path)?;
 
     // Upscale the image using the high quality upscaler
@@ -432,7 +433,7 @@ pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper: WallpaperData) -> Resul
     let upscaled_image = upscaled_image.resize_to_fill(2560, 1440, FilterType::Lanczos3);
 
     // Save to file
-    let dir = Path::new("wallpapers");
+    let dir = Path::new(WALLPAPERS_DIR);
     fs::create_dir_all(dir).await?;
     let datetime_str = wallpaper.datetime.to_rfc3339();
 
@@ -583,7 +584,7 @@ async fn remove_wallpaper_impl(packet: TokenUuidPacket) -> Result<()> {
     .into_iter()
     .flatten()
     {
-        let file_path = Path::new("wallpapers").join(file_name);
+        let file_path = Path::new(WALLPAPERS_DIR).join(file_name);
         if file_path.exists() {
             fs::remove_file(file_path).await?;
         }

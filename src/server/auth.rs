@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 const MIN_PASSWORD_LENGTH: usize = 6;
 const TOKEN_LENGTH: usize = 20;
-const AUTH_FILE: &str = "auth.ron";
+const AUTH_FILE: &str = "data/auth.ron";
 
 #[derive(Serialize, Deserialize)]
 struct Account {
