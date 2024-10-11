@@ -81,12 +81,6 @@ impl Wallpapy {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         egui_thumbhash::register(&cc.egui_ctx);
 
-        #[cfg(target_arch = "wasm32")]
-        {
-            let web_info = &_frame.info().web_info;
-            self.host = web_info.location.host.clone();
-        }
-
         cc.egui_ctx.style_mut(|style| {
             style.visuals.window_shadow = egui::epaint::Shadow::NONE;
             style.spacing.item_spacing = Vec2::new(8.0, 8.0);
@@ -119,6 +113,14 @@ impl eframe::App for Wallpapy {
     }
 
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if self.host.is_empty() {
+                let web_info = &_frame.info().web_info;
+                self.host = web_info.location.host.clone();
+            }
+        }
+
         self.get_database(ctx);
         if self.stored.auth_token.is_empty() {
             self.show_login_panel(ctx);
