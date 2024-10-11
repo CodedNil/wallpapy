@@ -608,8 +608,8 @@ async fn image_diffusion(
         &json!({
             "input": {
                 "prompt": prompt,
-                "width": 1280,
-                "height": 800,
+                "width": 1440,
+                "height": 900,
                 "aspect_ratio": "custom",
                 "output_format": "png",
                 "safety_tolerance": 2,

@@ -212,7 +212,11 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
             },
             {
                 "role": "system",
-                "content": format!("You are a wallpaper image description generator, describe a wallpaper image within 10 words, describe in the simplest of terms without detail, prioritise users comments as feedback, aim for variety above all else, every image should be totally refreshing with nothing in common with the previous few, types of content to include (not exhaustive just take inspiration) '{}', never include anything '{}'", style.contents, style.negative_contents)
+                "content": format!(
+                    "You are a wallpaper image description generator, describe a wallpaper image within 10 words\nDescribe in the simplest of terms without detail, prioritise users comments as feedback, aim for variety above all else, every image should be totally refreshing with little in common with the previous few\nTypes of content to include (not exhaustive just take inspiration) '{}'\nNever include anything '{}'",
+                    style.contents.replace('\n', " "),
+                    style.negative_contents.replace('\n', " ")
+                )
             },
             {
                 "role": "user",
@@ -243,7 +247,7 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
 
     // Make another gpt request to write out the full prompt in the correct format
     let request_body = json!({
-        "model": "gpt-4o-mini",
+        "model": "gpt-4o",
         "messages": [
             {
                 "role": "system",
@@ -252,7 +256,11 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
             },
             {
                 "role": "system",
-                "content": format!("You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines, follow the prompt guidelines for best results, the overall style direction is '{}' (include the guiding style in every prompt, not exact wording but the meaning)", style.style)
+                "content": format!(
+                    "You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines, follow the prompt guidelines for best results\nThe overall style direction is '{}' (include the guiding style in every prompt, not exact wording but the meaning)\nNever include anything '{}'",
+                    style.style.replace('\n', " "),
+                    style.negative_contents.replace('\n', " ")
+                )
             },
             {
                 "role": "user",
