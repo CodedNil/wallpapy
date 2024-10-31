@@ -596,7 +596,7 @@ async fn remove_wallpaper_impl(packet: TokenUuidPacket) -> Result<()> {
     Ok(())
 }
 
-/// <https://replicate.com/black-forest-labs/flux-schnell>
+/// <https://replicate.com/recraft-ai/recraft-v3>
 async fn image_diffusion(
     client: &Client,
     api_token: &str,
@@ -605,17 +605,12 @@ async fn image_diffusion(
     let result_url = replicate_request_prediction(
         client,
         api_token,
-        "https://api.replicate.com/v1/models/black-forest-labs/flux-1.1-pro/predictions",
+        "https://api.replicate.com/v1/models/recraft-ai/recraft-v3/predictions",
         &json!({
             "input": {
                 "prompt": prompt,
-                "width": 1440,
-                "height": 900,
-                "aspect_ratio": "custom",
-                "output_format": "png",
-                "safety_tolerance": 2,
-                "prompt_upsampling": true
-
+                "size": "1536x1024",
+                "style": "digital_illustration",
             }
         }),
     )
