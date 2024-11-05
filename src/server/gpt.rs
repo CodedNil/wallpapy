@@ -186,7 +186,6 @@ pub async fn generate_prompt(client: &Client, api_key: &str) -> Result<(String, 
             || Err(anyhow!("No content found in response {}", response_json)),
             |content| Ok(content.to_string()),
         )?;
-    print_gpt_pricing("Summarised discarded items", &response_json);
     history_string.push(format!("\n\nSummary of older history: {discarded_summary}"));
 
     // Create the image description
@@ -242,7 +241,6 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
             || Err(anyhow!("No content found in response {}", response_json)),
             |content| Ok(content.to_string()),
         )?;
-    print_gpt_pricing("Generated description", &response_json);
     log::info!("Generated description: {}", image_description);
 
     // Make another gpt request to write out the full prompt in the correct format
@@ -305,34 +303,6 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
                 |content| Ok(content.to_string()),
             )?,
     )?;
-    print_gpt_pricing("Generated prompt", &response_json);
 
     Ok(parsed_response)
-}
-
-fn print_gpt_pricing(desc: &str, response: &Value) {
-    let model_pricing = HashMap::from([
-        ("gpt-4o", (5.0, 15.0)),
-        ("gpt-4o-2024-08-06", (2.5, 10.0)),
-        ("gpt-4o-2024-05-13", (5.0, 15.0)),
-        ("gpt-4o-mini", (0.15, 0.6)),
-        ("gpt-4o-mini-2024-07-18", (0.15, 0.6)),
-    ]);
-    let model = response["model"].as_str().unwrap();
-    let (prompt_ppm, completition_ppm) = model_pricing.get(model).unwrap();
-
-    let prompt_tokens = response["usage"]["prompt_tokens"].as_u64().unwrap();
-    let completition_tokens = response["usage"]["completion_tokens"].as_u64().unwrap();
-    let (prompt_cost, completition_cost) = (
-        (prompt_ppm / 1_000_000.0) * prompt_tokens as f32,
-        (completition_ppm / 1_000_000.0) * completition_tokens as f32,
-    );
-    let total_cost = prompt_cost + completition_cost;
-    log::info!(
-        "{} using {} prompt tokens and {} completition tokens at ${}",
-        desc,
-        prompt_tokens,
-        completition_tokens,
-        total_cost,
-    );
 }
