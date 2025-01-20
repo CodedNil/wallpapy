@@ -35,7 +35,7 @@ async fn main() {
     // Set up router
     let app = server::routing::setup_routes(
         axum::Router::new()
-            .nest_service("/", tower_http::services::ServeDir::new("dist"))
+            .fallback_service(tower_http::services::ServeDir::new("dist"))
             .nest_service(
                 "/wallpapers",
                 tower_http::services::ServeDir::new(WALLPAPERS_DIR),
