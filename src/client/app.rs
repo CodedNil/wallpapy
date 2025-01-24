@@ -21,44 +21,52 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
-nestify::nest! {
-    pub struct Wallpapy {
-        host: String,
-        toasts: Arc<Mutex<Toasts>>,
+pub struct Wallpapy {
+    host: String,
+    toasts: Arc<Mutex<Toasts>>,
 
-        database: Option<Database>,
-        fullscreen_image: Option<Uuid>,
-        state_filter: StateFilter,
+    database: Option<Database>,
+    fullscreen_image: Option<Uuid>,
+    state_filter: StateFilter,
 
-        #>[derive(Deserialize, Serialize, Default)]
-        #>[serde(default)]
-        stored: pub struct StoredData {
-            auth_token: String,
-        },
+    stored: StoredData,
+    login_form: LoginForm,
+    comment_submission: String,
 
-        login_form: struct LoginForm {
-            username: String,
-            password: String,
-        },
-        comment_submission: String,
+    network_data: Arc<Mutex<DownloadData>>,
+}
 
-        #>[derive(Default)]*
-        network_data: Arc<Mutex<struct DownloadData {
-            login: enum LoginState {
-                #[default]
-                None,
-                InProgress,
-                Done(Result<String>),
-            },
-            get_database: enum GetDatabaseState {
-                None,
-                #[default]
-                Wanted,
-                InProgress,
-                Done(Result<Database>),
-            },
-        }>>,
-    }
+#[derive(Deserialize, Serialize, Default)]
+pub struct StoredData {
+    auth_token: String,
+}
+
+struct LoginForm {
+    username: String,
+    password: String,
+}
+
+#[derive(Default)]
+struct DownloadData {
+    login: LoginState,
+    get_database: GetDatabaseState,
+}
+
+#[derive(Default)]
+enum LoginState {
+    #[default]
+    None,
+    InProgress,
+    Done(Result<String>),
+}
+
+#[derive(Default)]
+enum GetDatabaseState {
+    None,
+    #[default]
+    Wanted,
+    InProgress,
+    Done(Result<Database>),
 }
 
 bitflags! {
