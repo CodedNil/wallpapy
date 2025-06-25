@@ -3,6 +3,7 @@ use crate::common::{
     TokenStringPacket, TokenUuidLikedPacket, TokenUuidPacket,
 };
 use anyhow::Result;
+use bincode::serde::{decode_from_slice, encode_to_vec};
 use uuid::Uuid;
 
 pub fn login(
@@ -14,10 +15,13 @@ pub fn login(
     ehttp::fetch(
         ehttp::Request::post(
             format!("http://{host}/login"),
-            bincode::serialize(&LoginPacket {
-                username: username.to_string(),
-                password: password.to_string(),
-            })
+            encode_to_vec(
+                LoginPacket {
+                    username: username.to_string(),
+                    password: password.to_string(),
+                },
+                bincode::config::standard(),
+            )
             .unwrap(),
         ),
         Box::new(move |res: Result<ehttp::Response, String>| {
@@ -49,10 +53,13 @@ pub fn generate_wallpaper(
     ehttp::fetch(
         ehttp::Request::post(
             format!("http://{host}/generate"),
-            bincode::serialize(&TokenStringPacket {
-                token: token.to_string(),
-                string: message.to_string(),
-            })
+            encode_to_vec(
+                &TokenStringPacket {
+                    token: token.to_string(),
+                    string: message.to_string(),
+                },
+                bincode::config::standard(),
+            )
             .unwrap(),
         ),
         Box::new(move |_| {
@@ -92,10 +99,13 @@ pub fn add_comment(
     ehttp::fetch(
         ehttp::Request::post(
             format!("http://{host}/commentadd"),
-            bincode::serialize(&TokenStringPacket {
-                token: token.to_string(),
-                string: comment.to_string(),
-            })
+            encode_to_vec(
+                &TokenStringPacket {
+                    token: token.to_string(),
+                    string: comment.to_string(),
+                },
+                bincode::config::standard(),
+            )
             .unwrap(),
         ),
         Box::new(move |_| {
@@ -113,10 +123,13 @@ pub fn remove_comment(
     ehttp::fetch(
         ehttp::Request::post(
             format!("http://{host}/commentremove"),
-            bincode::serialize(&TokenUuidPacket {
-                token: token.to_string(),
-                uuid: *comment_id,
-            })
+            encode_to_vec(
+                &TokenUuidPacket {
+                    token: token.to_string(),
+                    uuid: *comment_id,
+                },
+                bincode::config::standard(),
+            )
             .unwrap(),
         ),
         Box::new(move |_| {
@@ -135,11 +148,14 @@ pub fn like_image(
     ehttp::fetch(
         ehttp::Request::post(
             format!("http://{host}/imageliked"),
-            bincode::serialize(&TokenUuidLikedPacket {
-                token: token.to_string(),
-                uuid: *image_id,
-                liked,
-            })
+            encode_to_vec(
+                &TokenUuidLikedPacket {
+                    token: token.to_string(),
+                    uuid: *image_id,
+                    liked,
+                },
+                bincode::config::standard(),
+            )
             .unwrap(),
         ),
         Box::new(move |_| {
@@ -157,10 +173,13 @@ pub fn remove_image(
     ehttp::fetch(
         ehttp::Request::post(
             format!("http://{host}/imageremove"),
-            bincode::serialize(&TokenUuidPacket {
-                token: token.to_string(),
-                uuid: *image_id,
-            })
+            encode_to_vec(
+                &TokenUuidPacket {
+                    token: token.to_string(),
+                    uuid: *image_id,
+                },
+                bincode::config::standard(),
+            )
             .unwrap(),
         ),
         Box::new(move |_| {
@@ -178,10 +197,13 @@ pub fn recreate_image(
     ehttp::fetch(
         ehttp::Request::post(
             format!("http://{host}/imagerecreate"),
-            bincode::serialize(&TokenUuidPacket {
-                token: token.to_string(),
-                uuid: *image_id,
-            })
+            encode_to_vec(
+                &TokenUuidPacket {
+                    token: token.to_string(),
+                    uuid: *image_id,
+                },
+                bincode::config::standard(),
+            )
             .unwrap(),
         ),
         Box::new(move |_| {
@@ -200,11 +222,14 @@ pub fn edit_styles(
     ehttp::fetch(
         ehttp::Request::post(
             format!("http://{host}/styles"),
-            bincode::serialize(&SetStylePacket {
-                token: token.to_string(),
-                variant,
-                string: new.to_string(),
-            })
+            encode_to_vec(
+                &SetStylePacket {
+                    token: token.to_string(),
+                    variant,
+                    string: new.to_string(),
+                },
+                bincode::config::standard(),
+            )
             .unwrap(),
         ),
         Box::new(move |_| {
@@ -221,9 +246,12 @@ pub fn query_prompt(
     ehttp::fetch(
         ehttp::Request::post(
             format!("http://{host}/queryprompt"),
-            bincode::serialize(&TokenPacket {
-                token: token.to_string(),
-            })
+            encode_to_vec(
+                &TokenPacket {
+                    token: token.to_string(),
+                },
+                bincode::config::standard(),
+            )
             .unwrap(),
         ),
         Box::new(move |res: Result<ehttp::Response, String>| {

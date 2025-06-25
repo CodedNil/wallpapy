@@ -1,17 +1,17 @@
 use crate::{
+    PORT,
     client::networking::{
         add_comment, edit_styles, generate_wallpaper, get_database, like_image, login,
         query_prompt, recreate_image, remove_comment, remove_image,
     },
     common::{CommentData, Database, LikedState, StyleVariant, WallpaperData},
-    PORT,
 };
 use anyhow::Result;
 use bitflags::bitflags;
 use chrono::Local;
 use egui::{
-    vec2, Align2, CentralPanel, Color32, Context, CursorIcon, FontId, Frame, Image, Key,
-    PointerButton, Rect, RichText, ScrollArea, Sense, Shape, TextEdit, Vec2, Widget, Window,
+    Align2, CentralPanel, Color32, Context, CursorIcon, FontId, Frame, Image, Key, PointerButton,
+    Rect, RichText, ScrollArea, Sense, Shape, TextEdit, Vec2, Widget, Window, vec2,
 };
 use egui_notify::Toasts;
 use egui_pull_to_refresh::PullToRefresh;
@@ -900,7 +900,7 @@ impl Wallpapy {
                     ctx.request_repaint();
                 });
             }
-            GetDatabaseState::Done(ref response) => {
+            GetDatabaseState::Done(response) => {
                 match response {
                     Ok(database) => {
                         self.database = Some(database.clone());
@@ -969,7 +969,7 @@ impl Wallpapy {
                 ui.label("Logging in...");
                 ui.add(egui::Spinner::new());
             }
-            LoginState::Done(ref response) => {
+            LoginState::Done(response) => {
                 match response {
                     Ok(response) => {
                         if response.contains('|') {
