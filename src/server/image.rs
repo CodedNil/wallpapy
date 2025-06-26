@@ -17,6 +17,7 @@ use image::{
     DynamicImage, GenericImageView, ImageReader, Pixel, codecs::jpeg::JpegEncoder,
     imageops::FilterType,
 };
+use log::{error, info};
 use rand::seq::IndexedRandom;
 use reqwest::Client;
 use serde_json::json;
@@ -31,7 +32,7 @@ pub async fn generate(packet: Bytes) -> impl IntoResponse {
     let packet: TokenStringPacket = match decode_from_slice(&packet, bincode::config::standard()) {
         Ok((packet, _)) => packet,
         Err(e) => {
-            log::error!("Failed to deserialize generate_wallpaper packet: {:?}", e);
+            error!("Failed to deserialize generate_wallpaper packet: {:?}", e);
             return StatusCode::BAD_REQUEST;
         }
     };
@@ -51,7 +52,7 @@ pub async fn generate(packet: Bytes) -> impl IntoResponse {
     {
         Ok(()) => StatusCode::OK,
         Err(e) => {
-            log::error!("Failed to generate wallpaper: {:?}", e);
+            error!("Failed to generate wallpaper: {:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         }
     }
@@ -83,7 +84,7 @@ pub async fn latest() -> impl IntoResponse {
                         (StatusCode::OK, headers, data).into_response()
                     }
                     Err(e) => {
-                        log::error!("Failed to read image file: {:?}", e);
+                        error!("Failed to read image file: {:?}", e);
                         StatusCode::INTERNAL_SERVER_ERROR.into_response()
                     }
                 }
@@ -92,7 +93,7 @@ pub async fn latest() -> impl IntoResponse {
             }
         }
         Err(e) => {
-            log::error!("{:?}", e);
+            error!("{:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -127,7 +128,7 @@ pub async fn favourites() -> impl IntoResponse {
                         (StatusCode::OK, headers, data).into_response()
                     }
                     Err(e) => {
-                        log::error!("Failed to read image file: {:?}", e);
+                        error!("Failed to read image file: {:?}", e);
                         StatusCode::INTERNAL_SERVER_ERROR.into_response()
                     }
                 }
@@ -136,7 +137,7 @@ pub async fn favourites() -> impl IntoResponse {
             }
         }
         Err(e) => {
-            log::error!("{:?}", e);
+            error!("{:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -189,7 +190,7 @@ pub async fn smartget() -> impl IntoResponse {
                         (StatusCode::OK, headers, data).into_response()
                     }
                     Err(e) => {
-                        log::error!("Failed to read image file: {:?}", e);
+                        error!("Failed to read image file: {:?}", e);
                         StatusCode::INTERNAL_SERVER_ERROR.into_response()
                     }
                 }
@@ -198,7 +199,7 @@ pub async fn smartget() -> impl IntoResponse {
             }
         }
         Err(e) => {
-            log::error!("{:?}", e);
+            error!("{:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -208,7 +209,7 @@ pub async fn remove(packet: Bytes) -> impl IntoResponse {
     let packet: TokenUuidPacket = match decode_from_slice(&packet, bincode::config::standard()) {
         Ok((packet, _)) => packet,
         Err(e) => {
-            log::error!("Failed to deserialize remove_image packet: {:?}", e);
+            error!("Failed to deserialize remove_image packet: {:?}", e);
             return StatusCode::BAD_REQUEST;
         }
     };
@@ -219,7 +220,7 @@ pub async fn remove(packet: Bytes) -> impl IntoResponse {
     match Box::pin(remove_wallpaper_impl(packet)).await {
         Ok(()) => StatusCode::OK,
         Err(e) => {
-            log::error!("Errored remove_image {:?}", e);
+            error!("Errored remove_image {:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         }
     }
@@ -230,7 +231,7 @@ pub async fn like(packet: Bytes) -> impl IntoResponse {
     {
         Ok((packet, _)) => packet,
         Err(e) => {
-            log::error!("Failed to deserialize like_image packet: {:?}", e);
+            error!("Failed to deserialize like_image packet: {:?}", e);
             return StatusCode::BAD_REQUEST.into_response();
         }
     };
@@ -272,7 +273,7 @@ pub async fn like(packet: Bytes) -> impl IntoResponse {
             {
                 tokio::spawn(async move {
                     if let Err(e) = upscale_wallpaper_impl(packet.uuid, wallpaper).await {
-                        log::error!("Failed to upscale wallpaper: {:?}", e);
+                        error!("Failed to upscale wallpaper: {:?}", e);
                     }
                 });
             }
@@ -280,7 +281,7 @@ pub async fn like(packet: Bytes) -> impl IntoResponse {
             StatusCode::OK.into_response()
         }
         Err(e) => {
-            log::error!("Failed to like image: {:?}", e);
+            error!("Failed to like image: {:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -290,7 +291,7 @@ pub async fn recreate(packet: Bytes) -> impl IntoResponse {
     let packet: TokenUuidPacket = match decode_from_slice(&packet, bincode::config::standard()) {
         Ok((packet, _)) => packet,
         Err(e) => {
-            log::error!("Failed to deserialize recreate_image packet: {:?}", e);
+            error!("Failed to deserialize recreate_image packet: {:?}", e);
             return StatusCode::BAD_REQUEST.into_response();
         }
     };
@@ -308,7 +309,7 @@ pub async fn recreate(packet: Bytes) -> impl IntoResponse {
     }) {
         Ok(data) => data,
         Err(e) => {
-            log::error!("Failed to retrieve prompt data: {:?}", e);
+            error!("Failed to retrieve prompt data: {:?}", e);
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
@@ -316,7 +317,7 @@ pub async fn recreate(packet: Bytes) -> impl IntoResponse {
     match generate_wallpaper_impl(Some(prompt_data), None).await {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => {
-            log::error!("Failed to recreate image: {:?}", e);
+            error!("Failed to recreate image: {:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -326,7 +327,7 @@ pub async fn generate_wallpaper_impl(
     prompt_data: Option<PromptData>,
     message: Option<String>,
 ) -> Result<()> {
-    log::info!("Generating wallpaper");
+    info!("Generating wallpaper");
 
     let id = Uuid::new_v4();
     let datetime = Utc::now();
@@ -339,13 +340,13 @@ pub async fn generate_wallpaper_impl(
         prompt_data
     } else {
         let new = gpt::generate(message).await?;
-        log::info!("Generated prompt: {}", new.prompt);
+        info!("Generated prompt: {}", new.prompt);
         new
     };
 
     // Generate image
     let (image_url, image) = image_diffusion(&client, &api_token, &prompt_data.prompt).await?;
-    log::info!("Generated image: {}", &image_url);
+    info!("Generated image: {}", &image_url);
 
     // Resize the image to thumbnail
     let thumbnail = image.thumbnail(32, 32);
@@ -416,7 +417,7 @@ pub async fn generate_wallpaper_impl(
 }
 
 pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper: WallpaperData) -> Result<()> {
-    log::info!("Upscaling wallpaper {id}");
+    info!("Upscaling wallpaper {id}");
 
     // Prepare client
     let client = Client::new();
@@ -429,7 +430,7 @@ pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper: WallpaperData) -> Resul
 
     // Upscale the image using the high quality upscaler
     let (upscaled_url, upscaled_image) = upscale_image(&client, &api_token, &image).await?;
-    log::info!("Upscaled image: {}", &upscaled_url);
+    info!("Upscaled image: {}", &upscaled_url);
     let upscaled_image = upscaled_image.resize_to_fill(3840, 2160, FilterType::Lanczos3);
 
     // Save to file
