@@ -75,8 +75,9 @@ pub fn get_database(host: &str, on_done: impl 'static + Send + FnOnce(Result<Dat
             on_done(match res {
                 Ok(res) => {
                     if res.status == 200 {
-                        bincode::deserialize(&res.bytes)
-                            .map_or_else(|_| Err(anyhow::anyhow!("Failed to load database")), Ok)
+                        decode_from_slice(&res.bytes, bincode::config::standard())
+                            .map(|(database, _)| database)
+                            .map_err(|_| anyhow::anyhow!("Failed to load database"))
                     } else {
                         Err(anyhow::anyhow!(
                             "Failed to load database, status code: {}",

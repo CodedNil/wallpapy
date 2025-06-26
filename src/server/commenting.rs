@@ -3,12 +3,13 @@ use crate::common::{
 };
 use crate::server::{auth::verify_token, gpt, read_database, write_database};
 use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
+use bincode::serde::decode_from_slice;
 use chrono::Utc;
 use uuid::Uuid;
 
 pub async fn add(packet: Bytes) -> impl IntoResponse {
-    let packet: TokenStringPacket = match bincode::deserialize(&packet) {
-        Ok(packet) => packet,
+    let packet: TokenStringPacket = match decode_from_slice(&packet, bincode::config::standard()) {
+        Ok((packet, _)) => packet,
         Err(e) => {
             log::error!("Failed to deserialize add_comment packet: {:?}", e);
             return StatusCode::BAD_REQUEST;
@@ -47,8 +48,8 @@ pub async fn add(packet: Bytes) -> impl IntoResponse {
 }
 
 pub async fn remove(packet: Bytes) -> impl IntoResponse {
-    let packet: TokenUuidPacket = match bincode::deserialize(&packet) {
-        Ok(packet) => packet,
+    let packet: TokenUuidPacket = match decode_from_slice(&packet, bincode::config::standard()) {
+        Ok((packet, _)) => packet,
         Err(e) => {
             log::error!("Failed to deserialize remove_comment packet: {:?}", e);
             return StatusCode::BAD_REQUEST;
@@ -76,8 +77,8 @@ pub async fn remove(packet: Bytes) -> impl IntoResponse {
 }
 
 pub async fn styles(packet: Bytes) -> impl IntoResponse {
-    let packet: SetStylePacket = match bincode::deserialize(&packet) {
-        Ok(packet) => packet,
+    let packet: SetStylePacket = match decode_from_slice(&packet, bincode::config::standard()) {
+        Ok((packet, _)) => packet,
         Err(e) => {
             log::error!("Failed to deserialize styles packet: {:?}", e);
             return StatusCode::BAD_REQUEST;
@@ -114,8 +115,8 @@ pub async fn styles(packet: Bytes) -> impl IntoResponse {
 }
 
 pub async fn query_prompt(packet: Bytes) -> impl IntoResponse {
-    let packet: TokenPacket = match bincode::deserialize(&packet) {
-        Ok(packet) => packet,
+    let packet: TokenPacket = match decode_from_slice(&packet, bincode::config::standard()) {
+        Ok((packet, _)) => packet,
         Err(e) => {
             log::error!("Failed to deserialize query_prompt packet: {:?}", e);
             return (StatusCode::BAD_REQUEST, String::new());

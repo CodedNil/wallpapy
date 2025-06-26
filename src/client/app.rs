@@ -332,7 +332,7 @@ impl Wallpapy {
                                 self.host, file.file_name
                             ))
                             .show_loading_spinner(false)
-                            .rounding(16.0)
+                            .corner_radius(16.0)
                             .ui(ui);
 
                             let font_id = FontId::proportional(20.0);
@@ -343,11 +343,9 @@ impl Wallpapy {
                                 )
                                 .clicked()
                             {
-                                ui.output_mut(|o: &mut egui::PlatformOutput| {
-                                    o.copied_text
-                                        .clone_from(&wallpaper.prompt_data.shortened_prompt);
-                                    self.toasts.lock().info("Text copied to clipboard");
-                                });
+                                ui.ctx()
+                                    .copy_text(wallpaper.prompt_data.shortened_prompt.clone());
+                                self.toasts.lock().info("Text copied to clipboard");
                             }
                             if ui
                                 .button(
@@ -356,10 +354,8 @@ impl Wallpapy {
                                 )
                                 .clicked()
                             {
-                                ui.output_mut(|o: &mut egui::PlatformOutput| {
-                                    o.copied_text.clone_from(&wallpaper.prompt_data.prompt);
-                                    self.toasts.lock().info("Prompt copied to clipboard");
-                                });
+                                ui.ctx().copy_text(wallpaper.prompt_data.prompt.clone());
+                                self.toasts.lock().info("Prompt copied to clipboard");
                             }
                             ui.horizontal(|ui| {
                                 ui.label(
@@ -771,11 +767,9 @@ impl Wallpapy {
             sub_button_hovered = true;
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
             if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
-                ui.output_mut(|o: &mut egui::PlatformOutput| {
-                    o.copied_text
-                        .clone_from(&wallpaper.prompt_data.shortened_prompt);
-                    self.toasts.lock().info("Text copied to clipboard");
-                });
+                ui.ctx()
+                    .copy_text(wallpaper.prompt_data.shortened_prompt.clone());
+                self.toasts.lock().info("Text copied to clipboard");
             }
         }
 
@@ -877,10 +871,8 @@ impl Wallpapy {
         if is_hovering {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
             if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
-                ui.output_mut(|o: &mut egui::PlatformOutput| {
-                    o.copied_text.clone_from(&comment.comment);
-                    self.toasts.lock().info("Comment copied to clipboard");
-                });
+                ui.ctx().copy_text(comment.comment.clone());
+                self.toasts.lock().info("Comment copied to clipboard");
             }
         }
     }

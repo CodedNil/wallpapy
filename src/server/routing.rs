@@ -1,10 +1,11 @@
 use crate::server::{auth::login_server, commenting, format_duration, image, read_database};
 use axum::{
+    Router,
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
-    Router,
 };
+use bincode::serde::encode_to_vec;
 use chrono::{Duration, Utc};
 
 const NEW_WALLPAPER_INTERVAL: Duration = Duration::hours(6);
@@ -27,7 +28,7 @@ pub fn setup_routes(app: Router) -> Router {
 
 pub async fn get_database() -> impl IntoResponse {
     match read_database().await {
-        Ok(database) => match bincode::serialize(&database) {
+        Ok(database) => match encode_to_vec(&database, bincode::config::standard()) {
             Ok(data) => (StatusCode::OK, data).into_response(),
             Err(e) => {
                 log::error!("{:?}", e);

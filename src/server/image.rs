@@ -1,25 +1,26 @@
+use crate::WALLPAPERS_DIR;
 use crate::common::{
     ColorData, ImageFile, LikedState, PromptData, TokenStringPacket, TokenUuidLikedPacket,
     TokenUuidPacket, WallpaperData,
 };
 use crate::server::{auth::verify_token, gpt, read_database, write_database};
-use crate::WALLPAPERS_DIR;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use axum::{
     body::Bytes,
     http::{HeaderMap, HeaderValue, StatusCode},
     response::IntoResponse,
 };
-use base64::{engine::general_purpose::STANDARD, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use bincode::serde::decode_from_slice;
 use chrono::{Timelike, Utc};
-use image::codecs::jpeg::JpegEncoder;
-use image::imageops::FilterType;
-use image::{DynamicImage, GenericImageView, ImageReader, Pixel};
-use rand::seq::SliceRandom;
+use image::{
+    DynamicImage, GenericImageView, ImageReader, Pixel, codecs::jpeg::JpegEncoder,
+    imageops::FilterType,
+};
+use rand::seq::IndexedRandom;
 use reqwest::Client;
 use serde_json::json;
-use std::io::Cursor;
-use std::{env, path::Path, time::Duration};
+use std::{env, io::Cursor, path::Path, time::Duration};
 use thumbhash::rgba_to_thumb_hash;
 use tokio::fs;
 use uuid::Uuid;
@@ -27,8 +28,8 @@ use uuid::Uuid;
 const TIMEOUT: u64 = 360;
 
 pub async fn generate(packet: Bytes) -> impl IntoResponse {
-    let packet: TokenStringPacket = match bincode::deserialize(&packet) {
-        Ok(packet) => packet,
+    let packet: TokenStringPacket = match decode_from_slice(&packet, bincode::config::standard()) {
+        Ok((packet, _)) => packet,
         Err(e) => {
             log::error!("Failed to deserialize generate_wallpaper packet: {:?}", e);
             return StatusCode::BAD_REQUEST;
@@ -105,7 +106,7 @@ pub async fn favourites() -> impl IntoResponse {
                 .into_values()
                 .filter(|wallpaper| matches!(wallpaper.liked_state, LikedState::Liked))
                 .collect::<Vec<_>>()
-                .choose(&mut rand::thread_rng())
+                .choose(&mut rand::rng())
                 .cloned();
 
             if let Some(wallpaper) = liked_image {
@@ -167,7 +168,7 @@ pub async fn smartget() -> impl IntoResponse {
                                 <= acceptable_brightness_range.1)
                 })
                 .collect::<Vec<_>>()
-                .choose(&mut rand::thread_rng())
+                .choose(&mut rand::rng())
                 .cloned();
 
             if let Some(wallpaper) = liked_image {
@@ -204,8 +205,8 @@ pub async fn smartget() -> impl IntoResponse {
 }
 
 pub async fn remove(packet: Bytes) -> impl IntoResponse {
-    let packet: TokenUuidPacket = match bincode::deserialize(&packet) {
-        Ok(packet) => packet,
+    let packet: TokenUuidPacket = match decode_from_slice(&packet, bincode::config::standard()) {
+        Ok((packet, _)) => packet,
         Err(e) => {
             log::error!("Failed to deserialize remove_image packet: {:?}", e);
             return StatusCode::BAD_REQUEST;
@@ -225,8 +226,9 @@ pub async fn remove(packet: Bytes) -> impl IntoResponse {
 }
 
 pub async fn like(packet: Bytes) -> impl IntoResponse {
-    let packet: TokenUuidLikedPacket = match bincode::deserialize(&packet) {
-        Ok(packet) => packet,
+    let packet: TokenUuidLikedPacket = match decode_from_slice(&packet, bincode::config::standard())
+    {
+        Ok((packet, _)) => packet,
         Err(e) => {
             log::error!("Failed to deserialize like_image packet: {:?}", e);
             return StatusCode::BAD_REQUEST.into_response();
@@ -283,8 +285,8 @@ pub async fn like(packet: Bytes) -> impl IntoResponse {
 }
 
 pub async fn recreate(packet: Bytes) -> impl IntoResponse {
-    let packet: TokenUuidPacket = match bincode::deserialize(&packet) {
-        Ok(packet) => packet,
+    let packet: TokenUuidPacket = match decode_from_slice(&packet, bincode::config::standard()) {
+        Ok((packet, _)) => packet,
         Err(e) => {
             log::error!("Failed to deserialize recreate_image packet: {:?}", e);
             return StatusCode::BAD_REQUEST.into_response();

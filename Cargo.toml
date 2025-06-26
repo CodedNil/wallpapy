@@ -64,7 +64,7 @@ tower-http = { version = "0.6.6", features = [
     "compression-gzip",
 ] }
 rand = "0.9.1"
-argon2 = "0.5.3"
+argon2 = { version = "0.5.3", features = ["std"] }
 mime_guess = "2.0.5"
 webp = "0.3.0"
 
