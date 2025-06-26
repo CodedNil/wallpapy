@@ -271,7 +271,9 @@ pub async fn like(packet: Bytes) -> impl IntoResponse {
                     || wallpaper.liked_state == LikedState::Loved)
             {
                 tokio::spawn(async move {
-                    let _ = upscale_wallpaper_impl(packet.uuid, wallpaper).await;
+                    if let Err(e) = upscale_wallpaper_impl(packet.uuid, wallpaper).await {
+                        log::error!("Failed to upscale wallpaper: {:?}", e);
+                    }
                 });
             }
 
@@ -365,6 +367,7 @@ pub async fn generate_wallpaper_impl(
         dir.join(&file_name),
         &*webp::Encoder::from_image(&image).unwrap().encode(90.0),
     )?;
+    // image.save_with_format(dir.join(&file_name), ImageFormat::Avif)?;
     let original_file = ImageFile {
         file_name,
         width: image.width(),
@@ -380,6 +383,7 @@ pub async fn generate_wallpaper_impl(
             .unwrap()
             .encode(90.0),
     )?;
+    // thumb_image.save_with_format(dir.join(&thumb_file_name), ImageFormat::Avif)?;
     let thumbnail_file = ImageFile {
         file_name: thumb_file_name,
         width: thumb_image.width(),
@@ -424,15 +428,9 @@ pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper: WallpaperData) -> Resul
     let image = image::open(&image_path)?;
 
     // Upscale the image using the high quality upscaler
-    let (upscaled_url, upscaled_image) = upscale_image(
-        &client,
-        &api_token,
-        &image,
-        &wallpaper.prompt_data.shortened_prompt,
-    )
-    .await?;
+    let (upscaled_url, upscaled_image) = upscale_image(&client, &api_token, &image).await?;
     log::info!("Upscaled image: {}", &upscaled_url);
-    let upscaled_image = upscaled_image.resize_to_fill(2560, 1440, FilterType::Lanczos3);
+    let upscaled_image = upscaled_image.resize_to_fill(3840, 2160, FilterType::Lanczos3);
 
     // Save to file
     let dir = Path::new(WALLPAPERS_DIR);
@@ -447,6 +445,7 @@ pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper: WallpaperData) -> Resul
             .unwrap()
             .encode(90.0),
     )?;
+    // upscaled_image.save_with_format(dir.join(&upscaled_file_name), ImageFormat::Avif)?;
     let upscaled_file = Some(ImageFile {
         file_name: upscaled_file_name,
         width: upscaled_image.width(),
@@ -462,6 +461,7 @@ pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper: WallpaperData) -> Resul
             .unwrap()
             .encode(90.0),
     )?;
+    // thumb_image.save_with_format(dir.join(&thumb_file_name), ImageFormat::Avif)?;
     let thumbnail_file = ImageFile {
         file_name: thumb_file_name,
         width: thumb_image.width(),
@@ -598,7 +598,7 @@ async fn remove_wallpaper_impl(packet: TokenUuidPacket) -> Result<()> {
     Ok(())
 }
 
-/// <https://replicate.com/recraft-ai/recraft-v3>
+/// <https://replicate.com/bytedance/seedream-3>
 async fn image_diffusion(
     client: &Client,
     api_token: &str,
@@ -607,12 +607,15 @@ async fn image_diffusion(
     let result_url = replicate_request_prediction(
         client,
         api_token,
-        "https://api.replicate.com/v1/models/recraft-ai/recraft-v3/predictions",
+        "https://api.replicate.com/v1/models/bytedance/seedream-3/predictions",
         &json!({
             "input": {
                 "prompt": prompt,
-                "size": "1536x1024",
-                "style": "digital_illustration",
+                "size": "big",
+                "aspect_ratio": "custom",
+                "width": 1920,
+                "height": 1080,
+                "guidance_scale": 2.5
             }
         }),
     )
@@ -631,7 +634,6 @@ async fn upscale_image(
     client: &Client,
     api_token: &str,
     image: &DynamicImage,
-    prompt: &str,
 ) -> Result<(String, DynamicImage)> {
     let mut bytes = Vec::new();
     let encoder = JpegEncoder::new_with_quality(&mut bytes, 90);
@@ -641,23 +643,10 @@ async fn upscale_image(
     let result_url = replicate_request_prediction(
         client,
         api_token,
-        "",
+        "https://api.replicate.com/v1/models/recraft-ai/recraft-crisp-upscale/predictions",
         &json!({
-            "version": "dfad41707589d68ecdccd1dfa600d55a208f9310748e44bfe35b4a6291453d5e",
             "input": {
                 "image": image_uri,
-                "prompt": format!("{}, painting, wallpaper, masterpiece, best quality, highres", prompt),
-                "negative_prompt": "(worst quality, low quality, normal quality:2), realistic, (signature:3, signed, watermark, inscription, writing, text)",
-                "dynamic": 6,
-                "handfix": "disabled",
-                "sharpen": 0,
-                "sd_model": "juggernaut_reborn.safetensors [338b85bc4f]",
-                "scheduler": "DPM++ 3M SDE Karras",
-                "creativity": 0.35,
-                "resemblance": 0.6,
-                "scale_factor": 2,
-                "output_format": "png",
-                "num_inference_steps": 18,
             }
         }),
     )

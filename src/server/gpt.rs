@@ -1,11 +1,89 @@
 use crate::common::{Database, DatabaseStyle, LikedState, PromptData};
 use crate::server::{format_duration, read_database};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::Utc;
-use reqwest::Client;
-use serde_json::{json, Value};
-use std::collections::HashMap;
-use std::env;
+use log::error;
+use reqwest::{
+    Client,
+    header::{CONTENT_TYPE, HeaderMap, HeaderValue},
+};
+use schemars::generate::SchemaSettings;
+use schemars::{JsonSchema, SchemaGenerator};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use std::{collections::HashMap, env, error::Error, sync::LazyLock};
+
+static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
+
+pub async fn llm_parse<T>(
+    context: Vec<String>,
+    message: String,
+) -> Result<T, Box<dyn Error + Send + Sync>>
+where
+    T: JsonSchema + DeserializeOwned,
+{
+    // Construct the URL with proper variable substitution
+    let url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
+        model = "gemini-2.5-flash-lite-preview-06-17",
+        api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY not set")
+    );
+
+    // Set up request headers.
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+    // Generate the JSON schema dynamically using `schemars`.
+    let mut schema_object = SchemaGenerator::new(SchemaSettings::openapi3().with(|s| {
+        s.inline_subschemas = true;
+    }))
+    .into_root_schema_for::<T>();
+    if let Some(object) = schema_object.as_object_mut() {
+        object.remove("$schema");
+    }
+
+    // Create the inputs
+    let mut payload = json!({
+        "contents": [{"parts": [{"text": message}]}],
+        "generationConfig": {
+            "response_mime_type": "application/json",
+            "response_schema": schema_object
+        }
+    });
+    if !context.is_empty() {
+        let system_parts = context
+            .into_iter()
+            .map(|msg| json!({"text": msg}))
+            .collect::<Vec<_>>();
+        payload["system_instruction"] = json!({"parts": system_parts});
+    }
+
+    // Send the request and check for errors
+    let response = HTTP_CLIENT
+        .post(url)
+        .headers(headers)
+        .json(&payload)
+        .send()
+        .await?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Request failed with status {}: {}",
+            response.status(),
+            response.text().await?
+        )
+        .into());
+    }
+
+    // Parse response JSON and extract inner text.
+    let response_json: Value = response.json().await?;
+    let inner_text = response_json
+        .pointer("/candidates/0/content/parts/0/text")
+        .and_then(|v| v.as_str())
+        .ok_or("Unexpected response structure")?;
+
+    Ok(serde_json::from_str(inner_text)?)
+}
 
 const PROMPT_GUIDELINES: &str = "A well-crafted FLUX.1 prompt typically includes the following components:
     Subject: The main focus of the image.
@@ -76,12 +154,24 @@ Design a mythical creature that combines elements of a lion, an eagle, and a dra
 Create an abstract representation of the emotion 'hope' using a palette of warm colors. Incorporate flowing shapes and subtle human silhouettes to suggest a sense of movement and aspiration
 ";
 
-pub async fn generate_prompt(client: &Client, api_key: &str) -> Result<(String, DatabaseStyle)> {
+#[derive(Serialize, Deserialize, JsonSchema)]
+struct DiscardedSummary {
+    /// Summary of the users loved descriptions, do not include common things like seasons, time of day etc, do not repeat similar items and err on the side of fewer items, ideally 1 word per item, max 3 words per item if needed
+    loved: Vec<String>,
+    /// Summary of the users liked descriptions, same rules as for loved
+    liked: Vec<String>,
+    /// Summary of the users disliked descriptions, same rules as for loved
+    disliked: Vec<String>,
+    /// Summary of all other descriptions, same rules as for loved
+    others: Vec<String>,
+}
+
+pub async fn generate_prompt() -> Result<(String, DatabaseStyle)> {
     // Read the database
     let database = match read_database().await {
         Ok(db) => db,
         Err(e) => {
-            log::error!("Failed accessing database {:?}", e);
+            error!("Failed accessing database {:?}", e);
             Database {
                 style: DatabaseStyle::default(),
                 wallpapers: HashMap::new(),
@@ -154,155 +244,60 @@ pub async fn generate_prompt(client: &Client, api_key: &str) -> Result<(String, 
         }
     }
 
-    // Use gpt mini to summarise the discarded string into the key elements
-    let request_body = json!({
-        "model": "gpt-4o-mini",
-        "messages": [
-            {
-                "role": "user",
-                "content": format!(
-                    "Summarise this history of image descriptions, taking out just the key concepts to create 3 comma separated lists of them without new lines, do not include common things like seasons, time of day etc, do not repeat similar items and err on the side of fewer items, ideally 1 word per item, max 3 words per item if needed\nExample output: (user LOVED: item, item) (user liked: item, item, item) (user disliked: item, item) (others: item, item)\n\nLoved items: {}\nLiked items: {}\nDisliked items: {}\nOther items: {}\nOutput:",
-                    discarded_loves.join(", "),
-                    discarded_likes.join(", "),
-                    discarded_dislikes.join(", "),
-                    discarded_others.join(", ")
-                )
+    // Use LLM to summarize the discarded string into the key elements
+    match llm_parse::<DiscardedSummary>(
+        vec![],
+        format!(
+            "Loved items: {}\nLiked items: {}\nDisliked items: {}\nOther items: {}",
+            discarded_loves.join(", "),
+            discarded_likes.join(", "),
+            discarded_dislikes.join(", "),
+            discarded_others.join(", ")
+        ),
+    )
+    .await
+    {
+        Ok(output) => {
+            let mut summary_parts = Vec::new();
+
+            if !output.loved.is_empty() {
+                summary_parts.push(format!("(user LOVED: {})", output.loved.join(", ")));
             }
-        ],
-        "max_completion_tokens": 512
-    });
-    let response = client
-        .post("https://api.openai.com/v1/chat/completions")
-        .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {api_key}"))
-        .json(&request_body)
-        .send()
-        .await?;
-    let response_json: Value = response.json().await?;
-    let discarded_summary = response_json["choices"]
-        .get(0)
-        .and_then(|choice| choice["message"]["content"].as_str())
-        .map_or_else(
-            || Err(anyhow!("No content found in response {}", response_json)),
-            |content| Ok(content.to_string()),
-        )?;
-    history_string.push(format!("\n\nSummary of older history: {discarded_summary}"));
+            if !output.liked.is_empty() {
+                summary_parts.push(format!("(user liked: {})", output.liked.join(", ")));
+            }
+            if !output.disliked.is_empty() {
+                summary_parts.push(format!("(user disliked: {})", output.disliked.join(", ")));
+            }
+            if !output.others.is_empty() {
+                summary_parts.push(format!("(others: {})", output.others.join(", ")));
+            }
 
-    // Create the image description
-    let history_string = history_string.join("\n");
+            if !summary_parts.is_empty() {
+                history_string.push(format!(
+                    "\n\nSummary of older history: {}",
+                    summary_parts.join(" ")
+                ));
+            }
+        }
+        Err(err) => {
+            error!("Failed to parse discarded summary: {}", err);
+        }
+    }
 
-    Ok((history_string, database.style))
+    Ok((history_string.join("\n"), database.style))
 }
 
 pub async fn generate(message: Option<String>) -> Result<PromptData> {
-    let client = Client::new();
-    let api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
-
     let user_message = message.map_or_else(String::new, |message| format!("'User messaged '{message}', this takes precedence over any previous comments and prompts', "));
 
-    let (history_string, style) = generate_prompt(&client, &api_key).await?;
-    let request_body = json!({
-        "model": "gpt-4o",
-        "messages": [
-            {
-                "role": "system",
-                "name": "history",
-                "content": format!("History of previous prompts and comments:\n{history_string}")
-            },
-            {
-                "role": "system",
-                "content": format!(
-                    "You are a wallpaper image description generator, describe a wallpaper image within 10 words\nDescribe in the simplest of terms without detail, prioritise users comments as feedback, aim for variety above all else, every image should be totally refreshing with little in common with the previous few\nTypes of content to include (not exhaustive just take inspiration) '{}'\nNever include anything '{}'",
-                    style.contents.replace('\n', " "),
-                    style.negative_contents.replace('\n', " ")
-                )
-            },
-            {
-                "role": "user",
-                "content": format!("Create me a new image prompt, {}Prompt:", user_message)
-            }
-        ],
-        "max_completion_tokens": 60,
-        "temperature": 1.4,
-        "presence_penalty": 0.6
-    });
-    let response = client
-        .post("https://api.openai.com/v1/chat/completions")
-        .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {api_key}"))
-        .json(&request_body)
-        .send()
-        .await?;
-    let response_json: Value = response.json().await?;
-    let image_description = response_json["choices"]
-        .get(0)
-        .and_then(|choice| choice["message"]["content"].as_str())
-        .map_or_else(
-            || Err(anyhow!("No content found in response {}", response_json)),
-            |content| Ok(content.to_string()),
-        )?;
-    log::info!("Generated description: {}", image_description);
-
-    // Make another gpt request to write out the full prompt in the correct format
-    let request_body = json!({
-        "model": "gpt-4o",
-        "messages": [
-            {
-                "role": "system",
-                "name": "prompt_guidelines",
-                "content": PROMPT_GUIDELINES
-            },
-            {
-                "role": "system",
-                "content": format!(
-                    "You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines, follow the prompt guidelines for best results\nThe overall style direction is '{}' (include the guiding style in every prompt, not exact wording but the meaning)\nNever include anything '{}'",
-                    style.style.replace('\n', " "),
-                    style.negative_contents.replace('\n', " ")
-                )
-            },
-            {
-                "role": "user",
-                "content": format!("Create me a new image prompt from this description (use this only as a guide not a strict command, expand on it, alter details etc as you see fit) '{}', {}Prompt:", image_description, user_message)
-            }
-        ],
-        "response_format": {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "prompt_data",
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "prompt": { "type": "string" },
-                        "shortened_prompt": {
-                            "type": "string",
-                            "description": "A shortened version of the prompt, only including the image description not style, max 25 words",
-                        },
-                    },
-                    "required": ["prompt", "shortened_prompt"],
-                    "additionalProperties": false
-                },
-                "strict": true
-            }
-        },
-        "max_completion_tokens": 256
-    });
-    let response = client
-        .post("https://api.openai.com/v1/chat/completions")
-        .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {api_key}"))
-        .json(&request_body)
-        .send()
-        .await?;
-    let response_json: Value = response.json().await?;
-    let parsed_response: PromptData = serde_json::from_str(
-        &response_json["choices"]
-            .get(0)
-            .and_then(|choice| choice["message"]["content"].as_str())
-            .map_or_else(
-                || Err(anyhow!("No content found in response {}", response_json)),
-                |content| Ok(content.to_string()),
-            )?,
-    )?;
-
-    Ok(parsed_response)
+    let (history_string, style) = generate_prompt().await?;
+    llm_parse::<PromptData>(vec![PROMPT_GUIDELINES.to_string(), format!("History of previous prompts and comments:\n{history_string}"), format!(
+            "You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines, follow the prompt guidelines for best results, prioritise users comments as feedback, aim for variety above all else, every image should be totally refreshing with little in common with the previous few\nTypes of content to include (not exhaustive just take inspiration) '{}'\nThe overall style direction is '{}' (include the guiding style in every prompt, not exact wording but the meaning)\nNever include anything '{}'",
+            style.contents.replace('\n', " "),
+            style.style.replace('\n', " "),
+            style.negative_contents.replace('\n', " ")
+        )], format!("Create me a new image prompt, {user_message}\nPrompt:")).await.map_err(|err| {
+            anyhow!("Failed to generate prompt: {}", err)
+        })
 }

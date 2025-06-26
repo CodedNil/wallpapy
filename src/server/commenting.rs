@@ -127,11 +127,7 @@ pub async fn query_prompt(packet: Bytes) -> impl IntoResponse {
     }
 
     // Query GPT for the prompt it would send to create an image
-    let generate_result = gpt::generate_prompt(
-        &reqwest::Client::new(),
-        &std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set"),
-    )
-    .await;
+    let generate_result = gpt::generate_prompt().await;
     match generate_result {
         Ok((request_body, _)) => (StatusCode::OK, request_body),
         Err(e) => {

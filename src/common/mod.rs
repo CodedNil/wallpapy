@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -48,9 +49,11 @@ pub struct ImageFile {
     pub height: u32,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
 pub struct PromptData {
+    /// The prompt to send to the image generator
     pub prompt: String,
+    /// A shortened version of the prompt, only including the image description not style, max 25 words
     pub shortened_prompt: String,
 }
 
