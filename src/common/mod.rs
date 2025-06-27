@@ -78,7 +78,7 @@ pub struct ColorData {
     pub contrast_ratio: f32,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum LikedState {
     Loved,
     Liked,

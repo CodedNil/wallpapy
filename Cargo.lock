@@ -1711,9 +1711,9 @@ checksum = "d0263a3d970d5c054ed9312c0057b4f3bde9c0b33836d3637361d4a9e6e7a408"
 
 [[package]]
 name = "indexmap"
-version = "2.9.0"
+version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cea70ddb795996207ad57735b50c5982d8844f38ba9ee5f1aedcfb708a2aa11e"
+checksum = "fe4cd85333e22411419a0bcae1297d25e58c9443848b11dc6a86fefe8c78a661"
 dependencies = [
  "equivalent",
  "hashbrown",
@@ -3221,9 +3221,9 @@ dependencies = [
 
 [[package]]
 name = "schemars"
-version = "1.0.1"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe8c9d1c68d67dd9f97ecbc6f932b60eb289c5dbddd8aa1405484a8fd2fcd984"
+checksum = "ab5f657913eee4bddb062d3aa42193b9285e0e333f852885909a27d867579f2a"
 dependencies = [
  "dyn-clone",
  "ref-cast",
@@ -3234,9 +3234,9 @@ dependencies = [
 
 [[package]]
 name = "schemars_derive"
-version = "1.0.1"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ca9fcb757952f8e8629b9ab066fc62da523c46c2b247b1708a3be06dd82530b"
+checksum = "5d367383cbc8d37ce3aa513ca69daf21053d8e96c999fec305c2b402d790e66c"
 dependencies = [
  "proc-macro2",
  "quote",

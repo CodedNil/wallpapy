@@ -114,18 +114,14 @@ struct DiscardedSummary {
 }
 
 pub async fn generate_prompt() -> Result<(String, DatabaseStyle)> {
-    // Read the database
-    let database = match read_database().await {
-        Ok(db) => db,
-        Err(e) => {
-            error!("Failed accessing database {:?}", e);
-            Database {
-                style: DatabaseStyle::default(),
-                wallpapers: HashMap::new(),
-                comments: HashMap::new(),
-            }
+    let database = read_database().await.unwrap_or_else(|e| {
+        error!("Failed accessing database {:?}", e);
+        Database {
+            style: DatabaseStyle::default(),
+            wallpapers: HashMap::new(),
+            comments: HashMap::new(),
         }
-    };
+    });
 
     // Collect the images and comments into a single list, sorted by datetime
     let mut database_history = database
@@ -142,8 +138,8 @@ pub async fn generate_prompt() -> Result<(String, DatabaseStyle)> {
     database_history.sort_by_key(|(datetime, _, _)| *datetime);
 
     let mut history_string = Vec::new();
-    let (mut discarded_loves, mut discarded_likes, mut discarded_dislikes, mut discarded_others) =
-        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let mut discarded: HashMap<LikedState, Vec<String>> = HashMap::new();
+
     for (i, (_, wallpaper, comment)) in database_history.iter().rev().enumerate() {
         if let Some(wallpaper) = wallpaper {
             if i < match wallpaper.liked_state {
@@ -162,21 +158,10 @@ pub async fn generate_prompt() -> Result<(String, DatabaseStyle)> {
                     wallpaper.prompt_data.shortened_prompt
                 ));
             } else if i < 60 {
-                let text = wallpaper.prompt_data.shortened_prompt.clone();
-                match wallpaper.liked_state {
-                    LikedState::Loved => {
-                        discarded_loves.push(text);
-                    }
-                    LikedState::Liked => {
-                        discarded_likes.push(text);
-                    }
-                    LikedState::Disliked => {
-                        discarded_dislikes.push(text);
-                    }
-                    LikedState::Neutral => {
-                        discarded_others.push(text);
-                    }
-                }
+                discarded
+                    .entry(wallpaper.liked_state)
+                    .or_insert(Vec::new())
+                    .push(wallpaper.prompt_data.shortened_prompt.clone());
             }
         }
         if let Some(comment) = comment {
@@ -187,23 +172,20 @@ pub async fn generate_prompt() -> Result<(String, DatabaseStyle)> {
     }
 
     // Use LLM to summarize the discarded string into the key elements
-    if !discarded_loves.is_empty()
-        || !discarded_likes.is_empty()
-        || !discarded_dislikes.is_empty()
-        || !discarded_others.is_empty()
-    {
+    if discarded.values().any(|v| !v.is_empty()) {
+        let summary_text = format!(
+            "Loved items: {}\nLiked items: {}\nDisliked items: {}\nOther items: {}",
+            discarded.get(&LikedState::Loved).unwrap().join(", "),
+            discarded.get(&LikedState::Liked).unwrap().join(", "),
+            discarded.get(&LikedState::Disliked).unwrap().join(", "),
+            discarded.get(&LikedState::Neutral).unwrap().join(", "),
+        );
         match llm_parse::<DiscardedSummary>(
             vec![],
             LLMSettings {
                 model: Model::Gemini25FlashLite,
             },
-            format!(
-                "Loved items: {}\nLiked items: {}\nDisliked items: {}\nOther items: {}",
-                discarded_loves.join(", "),
-                discarded_likes.join(", "),
-                discarded_dislikes.join(", "),
-                discarded_others.join(", ")
-            ),
+            summary_text,
         )
         .await
         {
