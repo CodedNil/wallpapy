@@ -32,7 +32,7 @@ pub async fn generate(packet: Bytes) -> impl IntoResponse {
     let packet: TokenStringPacket = match decode_from_slice(&packet, bincode::config::standard()) {
         Ok((packet, _)) => packet,
         Err(e) => {
-            error!("Failed to deserialize generate_wallpaper packet: {:?}", e);
+            error!("Failed to deserialize generate_wallpaper packet: {e:?}");
             return StatusCode::BAD_REQUEST;
         }
     };
@@ -52,7 +52,7 @@ pub async fn generate(packet: Bytes) -> impl IntoResponse {
     {
         Ok(()) => StatusCode::OK,
         Err(e) => {
-            error!("Failed to generate wallpaper: {:?}", e);
+            error!("Failed to generate wallpaper: {e:?}");
             StatusCode::INTERNAL_SERVER_ERROR
         }
     }
@@ -84,7 +84,7 @@ pub async fn latest() -> impl IntoResponse {
                         (StatusCode::OK, headers, data).into_response()
                     }
                     Err(e) => {
-                        error!("Failed to read image file: {:?}", e);
+                        error!("Failed to read image file: {e:?}");
                         StatusCode::INTERNAL_SERVER_ERROR.into_response()
                     }
                 }
@@ -93,7 +93,7 @@ pub async fn latest() -> impl IntoResponse {
             }
         }
         Err(e) => {
-            error!("{:?}", e);
+            error!("{e:?}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -128,7 +128,7 @@ pub async fn favourites() -> impl IntoResponse {
                         (StatusCode::OK, headers, data).into_response()
                     }
                     Err(e) => {
-                        error!("Failed to read image file: {:?}", e);
+                        error!("Failed to read image file: {e:?}");
                         StatusCode::INTERNAL_SERVER_ERROR.into_response()
                     }
                 }
@@ -137,7 +137,7 @@ pub async fn favourites() -> impl IntoResponse {
             }
         }
         Err(e) => {
-            error!("{:?}", e);
+            error!("{e:?}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -190,7 +190,7 @@ pub async fn smartget() -> impl IntoResponse {
                         (StatusCode::OK, headers, data).into_response()
                     }
                     Err(e) => {
-                        error!("Failed to read image file: {:?}", e);
+                        error!("Failed to read image file: {e:?}");
                         StatusCode::INTERNAL_SERVER_ERROR.into_response()
                     }
                 }
@@ -199,7 +199,7 @@ pub async fn smartget() -> impl IntoResponse {
             }
         }
         Err(e) => {
-            error!("{:?}", e);
+            error!("{e:?}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -209,7 +209,7 @@ pub async fn remove(packet: Bytes) -> impl IntoResponse {
     let packet: TokenUuidPacket = match decode_from_slice(&packet, bincode::config::standard()) {
         Ok((packet, _)) => packet,
         Err(e) => {
-            error!("Failed to deserialize remove_image packet: {:?}", e);
+            error!("Failed to deserialize remove_image packet: {e:?}");
             return StatusCode::BAD_REQUEST;
         }
     };
@@ -220,7 +220,7 @@ pub async fn remove(packet: Bytes) -> impl IntoResponse {
     match Box::pin(remove_wallpaper_impl(packet)).await {
         Ok(()) => StatusCode::OK,
         Err(e) => {
-            error!("Errored remove_image {:?}", e);
+            error!("Errored remove_image {e:?}");
             StatusCode::INTERNAL_SERVER_ERROR
         }
     }
@@ -231,7 +231,7 @@ pub async fn like(packet: Bytes) -> impl IntoResponse {
     {
         Ok((packet, _)) => packet,
         Err(e) => {
-            error!("Failed to deserialize like_image packet: {:?}", e);
+            error!("Failed to deserialize like_image packet: {e:?}");
             return StatusCode::BAD_REQUEST.into_response();
         }
     };
@@ -273,7 +273,7 @@ pub async fn like(packet: Bytes) -> impl IntoResponse {
             {
                 tokio::spawn(async move {
                     if let Err(e) = upscale_wallpaper_impl(packet.uuid, wallpaper).await {
-                        error!("Failed to upscale wallpaper: {:?}", e);
+                        error!("Failed to upscale wallpaper: {e:?}");
                     }
                 });
             }
@@ -281,7 +281,7 @@ pub async fn like(packet: Bytes) -> impl IntoResponse {
             StatusCode::OK.into_response()
         }
         Err(e) => {
-            error!("Failed to like image: {:?}", e);
+            error!("Failed to like image: {e:?}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -291,7 +291,7 @@ pub async fn recreate(packet: Bytes) -> impl IntoResponse {
     let packet: TokenUuidPacket = match decode_from_slice(&packet, bincode::config::standard()) {
         Ok((packet, _)) => packet,
         Err(e) => {
-            error!("Failed to deserialize recreate_image packet: {:?}", e);
+            error!("Failed to deserialize recreate_image packet: {e:?}");
             return StatusCode::BAD_REQUEST.into_response();
         }
     };
@@ -309,7 +309,7 @@ pub async fn recreate(packet: Bytes) -> impl IntoResponse {
     }) {
         Ok(data) => data,
         Err(e) => {
-            error!("Failed to retrieve prompt data: {:?}", e);
+            error!("Failed to retrieve prompt data: {e:?}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
@@ -317,7 +317,7 @@ pub async fn recreate(packet: Bytes) -> impl IntoResponse {
     match generate_wallpaper_impl(Some(prompt_data), None).await {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => {
-            error!("Failed to recreate image: {:?}", e);
+            error!("Failed to recreate image: {e:?}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -540,7 +540,7 @@ fn calculate_color_data(img: &DynamicImage) -> ColorData {
 fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     let max = r.max(g).max(b);
     let min = r.min(g).min(b);
-    let lightness = (max + min) / 2.0;
+    let lightness = min.midpoint(max);
 
     let mut hue = 0.0;
     let mut saturation = 0.0;

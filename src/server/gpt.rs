@@ -23,10 +23,10 @@ enum Model {
     Gemini25FlashLite,
 }
 impl Model {
-    fn as_str(&self) -> &'static str {
+    const fn as_str(&self) -> &'static str {
         match self {
-            Model::Gemini25Flash => "gemini-2.5-flash",
-            Model::Gemini25FlashLite => "gemini-2.5-flash-lite-preview-06-17",
+            Self::Gemini25Flash => "gemini-2.5-flash",
+            Self::Gemini25FlashLite => "gemini-2.5-flash-lite-preview-06-17",
         }
     }
 }
@@ -115,7 +115,7 @@ struct DiscardedSummary {
 
 pub async fn generate_prompt() -> Result<(String, DatabaseStyle)> {
     let database = read_database().await.unwrap_or_else(|e| {
-        error!("Failed accessing database {:?}", e);
+        error!("Failed accessing database {e:?}");
         Database {
             style: DatabaseStyle::default(),
             wallpapers: HashMap::new(),
@@ -160,7 +160,7 @@ pub async fn generate_prompt() -> Result<(String, DatabaseStyle)> {
             } else if i < 60 {
                 discarded
                     .entry(wallpaper.liked_state)
-                    .or_insert(Vec::new())
+                    .or_default()
                     .push(wallpaper.prompt_data.shortened_prompt.clone());
             }
         }
@@ -198,10 +198,10 @@ pub async fn generate_prompt() -> Result<(String, DatabaseStyle)> {
                 ]
                 .iter()
                 .filter_map(|(text, list)| {
-                    if !list.is_empty() {
-                        Some(format!("({}: {})", text, list.join(", ")))
-                    } else {
+                    if list.is_empty() {
                         None
+                    } else {
+                        Some(format!("({}: {})", text, list.join(", ")))
                     }
                 })
                 .collect::<Vec<_>>();
@@ -212,8 +212,8 @@ pub async fn generate_prompt() -> Result<(String, DatabaseStyle)> {
                     ));
                 }
             }
-            Err(err) => {
-                error!("Failed to parse discarded summary: {}", err);
+            Err(e) => {
+                error!("Failed to parse discarded summary: {e:?}");
             }
         }
     }

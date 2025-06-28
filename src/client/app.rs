@@ -16,6 +16,7 @@ use egui::{
 use egui_notify::Toasts;
 use egui_pull_to_refresh::PullToRefresh;
 use egui_thumbhash::ThumbhashImage;
+use log::{error, info};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -186,7 +187,7 @@ impl Wallpapy {
                 if ui.button("Query Prompt").clicked() {
                     query_prompt(&self.host, &self.stored.auth_token, move |result| {
                         if let Ok(prompt) = result {
-                            log::info!("{prompt}");
+                            info!("{prompt}");
                         }
                     });
                 }
@@ -898,7 +899,7 @@ impl Wallpapy {
                         self.database = Some(database.clone());
                     }
                     Err(e) => {
-                        log::error!("Failed to fetch galleries: {:?}", e);
+                        error!("Failed to fetch galleries: {e:?}");
                     }
                 }
                 network_data_guard.get_database = GetDatabaseState::None;

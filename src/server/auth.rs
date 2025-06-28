@@ -7,6 +7,7 @@ use argon2::{
 use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
 use bincode::{config::Configuration, serde::decode_from_slice};
 use chrono::{DateTime, Utc};
+use log::error;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -42,12 +43,12 @@ pub async fn login_server(packet: Bytes) -> impl IntoResponse {
         Ok((packet, _)) => match login_impl(&packet).await {
             Ok(token) => (StatusCode::OK, token),
             Err(e) => {
-                log::error!("Failed to login: {:?}", e);
+                error!("Failed to login: {e:?}");
                 (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
             }
         },
         Err(e) => {
-            log::error!("Failed to deserialise login packet: {:?}", e);
+            error!("Failed to deserialise login packet: {e:?}");
             (StatusCode::BAD_REQUEST, String::new())
         }
     }

@@ -7,6 +7,7 @@ use axum::{
 };
 use bincode::serde::encode_to_vec;
 use chrono::{Duration, Utc};
+use log::{error, info};
 
 const NEW_WALLPAPER_INTERVAL: Duration = Duration::hours(6);
 
@@ -31,12 +32,12 @@ pub async fn get_database() -> impl IntoResponse {
         Ok(database) => match encode_to_vec(&database, bincode::config::standard()) {
             Ok(data) => (StatusCode::OK, data).into_response(),
             Err(e) => {
-                log::error!("{:?}", e);
+                error!("{e:?}");
                 StatusCode::INTERNAL_SERVER_ERROR.into_response()
             }
         },
         Err(e) => {
-            log::error!("{:?}", e);
+            error!("{e:?}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -53,17 +54,17 @@ pub async fn start_server() {
                     .iter()
                     .max_by_key(|(_, wallpaper)| wallpaper.datetime)
                     .map_or(cur_time, |(_, wallpaper)| wallpaper.datetime);
-                log::info!(
+                info!(
                     "Time since last wallpaper: {}",
                     format_duration(cur_time - latest_time)
                 );
                 if cur_time - latest_time > NEW_WALLPAPER_INTERVAL {
-                    if let Err(err) = image::generate_wallpaper_impl(None, None).await {
-                        log::error!("Error generating wallpaper: {:?}", err);
+                    if let Err(e) = image::generate_wallpaper_impl(None, None).await {
+                        error!("Error generating wallpaper: {e:?}");
                     }
                 }
             }
-            Err(e) => log::error!("{:?}", e),
+            Err(e) => error!("{e:?}"),
         }
 
         // Sleep for 10 minutes

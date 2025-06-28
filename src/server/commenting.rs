@@ -5,13 +5,14 @@ use crate::server::{auth::verify_token, gpt, read_database, write_database};
 use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
 use bincode::serde::decode_from_slice;
 use chrono::Utc;
+use log::error;
 use uuid::Uuid;
 
 pub async fn add(packet: Bytes) -> impl IntoResponse {
     let packet: TokenStringPacket = match decode_from_slice(&packet, bincode::config::standard()) {
         Ok((packet, _)) => packet,
         Err(e) => {
-            log::error!("Failed to deserialize add_comment packet: {:?}", e);
+            error!("Failed to deserialize add_comment packet: {e:?}");
             return StatusCode::BAD_REQUEST;
         }
     };
@@ -41,7 +42,7 @@ pub async fn add(packet: Bytes) -> impl IntoResponse {
     match result {
         Ok(()) => StatusCode::OK,
         Err(e) => {
-            log::error!("Errored add_comment {:?}", e);
+            error!("Errored add_comment {e:?}");
             StatusCode::INTERNAL_SERVER_ERROR
         }
     }
@@ -51,7 +52,7 @@ pub async fn remove(packet: Bytes) -> impl IntoResponse {
     let packet: TokenUuidPacket = match decode_from_slice(&packet, bincode::config::standard()) {
         Ok((packet, _)) => packet,
         Err(e) => {
-            log::error!("Failed to deserialize remove_comment packet: {:?}", e);
+            error!("Failed to deserialize remove_comment packet: {e:?}");
             return StatusCode::BAD_REQUEST;
         }
     };
@@ -70,7 +71,7 @@ pub async fn remove(packet: Bytes) -> impl IntoResponse {
     match result {
         Ok(()) => StatusCode::OK,
         Err(e) => {
-            log::error!("Errored remove_comment {:?}", e);
+            error!("Errored remove_comment {e:?}");
             StatusCode::INTERNAL_SERVER_ERROR
         }
     }
@@ -80,7 +81,7 @@ pub async fn styles(packet: Bytes) -> impl IntoResponse {
     let packet: SetStylePacket = match decode_from_slice(&packet, bincode::config::standard()) {
         Ok((packet, _)) => packet,
         Err(e) => {
-            log::error!("Failed to deserialize styles packet: {:?}", e);
+            error!("Failed to deserialize styles packet: {e:?}");
             return StatusCode::BAD_REQUEST;
         }
     };
@@ -108,7 +109,7 @@ pub async fn styles(packet: Bytes) -> impl IntoResponse {
     match result {
         Ok(()) => StatusCode::OK,
         Err(e) => {
-            log::error!("Errored styles {:?}", e);
+            error!("Errored styles {e:?}");
             StatusCode::INTERNAL_SERVER_ERROR
         }
     }
@@ -118,7 +119,7 @@ pub async fn query_prompt(packet: Bytes) -> impl IntoResponse {
     let packet: TokenPacket = match decode_from_slice(&packet, bincode::config::standard()) {
         Ok((packet, _)) => packet,
         Err(e) => {
-            log::error!("Failed to deserialize query_prompt packet: {:?}", e);
+            error!("Failed to deserialize query_prompt packet: {e:?}");
             return (StatusCode::BAD_REQUEST, String::new());
         }
     };
@@ -131,7 +132,7 @@ pub async fn query_prompt(packet: Bytes) -> impl IntoResponse {
     match generate_result {
         Ok((request_body, _)) => (StatusCode::OK, request_body),
         Err(e) => {
-            log::error!("Errored query_prompt {:?}", e);
+            error!("Errored query_prompt {e:?}");
             (StatusCode::INTERNAL_SERVER_ERROR, String::new())
         }
     }
