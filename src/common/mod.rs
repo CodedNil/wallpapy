@@ -112,19 +112,19 @@ impl<T> HasToken for NetworkPacket<T> {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EmptyBody;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct LikeBody {
     pub uuid: Uuid,
     pub liked: LikedState,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct StyleBody {
     pub variant: StyleVariant,
     pub string: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum StyleVariant {
     Style,
     Contents,
