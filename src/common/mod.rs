@@ -87,39 +87,39 @@ pub enum LikedState {
 }
 
 // Network packets
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 pub struct LoginPacket {
     pub username: String,
     pub password: String,
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct TokenPacket {
+pub struct NetworkPacket<T> {
     pub token: String,
+    pub data: T,
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub trait HasToken {
+    fn token(&self) -> &str;
+}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T> HasToken for NetworkPacket<T> {
+    fn token(&self) -> &str {
+        &self.token
+    }
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct TokenStringPacket {
-    pub token: String,
-    pub string: String,
-}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EmptyBody;
 
 #[derive(Serialize, Deserialize)]
-pub struct TokenUuidPacket {
-    pub token: String,
-    pub uuid: Uuid,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct TokenUuidLikedPacket {
-    pub token: String,
+pub struct LikeBody {
     pub uuid: Uuid,
     pub liked: LikedState,
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct SetStylePacket {
-    pub token: String,
+pub struct StyleBody {
     pub variant: StyleVariant,
     pub string: String,
 }

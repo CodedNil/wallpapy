@@ -1,6 +1,5 @@
 use crate::common::{
-    Database, LikedState, LoginPacket, SetStylePacket, StyleVariant, TokenPacket,
-    TokenStringPacket, TokenUuidLikedPacket, TokenUuidPacket,
+    Database, LikeBody, LikedState, LoginPacket, NetworkPacket, StyleBody, StyleVariant,
 };
 use anyhow::Result;
 use bincode::serde::{decode_from_slice, encode_to_vec};
@@ -54,9 +53,9 @@ pub fn generate_wallpaper(
         ehttp::Request::post(
             format!("http://{host}/generate"),
             encode_to_vec(
-                &TokenStringPacket {
+                &NetworkPacket {
                     token: token.to_string(),
-                    string: message.to_string(),
+                    data: message.to_string(),
                 },
                 bincode::config::standard(),
             )
@@ -101,9 +100,9 @@ pub fn add_comment(
         ehttp::Request::post(
             format!("http://{host}/commentadd"),
             encode_to_vec(
-                &TokenStringPacket {
+                &NetworkPacket {
                     token: token.to_string(),
-                    string: comment.to_string(),
+                    data: comment.to_string(),
                 },
                 bincode::config::standard(),
             )
@@ -125,9 +124,9 @@ pub fn remove_comment(
         ehttp::Request::post(
             format!("http://{host}/commentremove"),
             encode_to_vec(
-                &TokenUuidPacket {
+                &NetworkPacket {
                     token: token.to_string(),
-                    uuid: *comment_id,
+                    data: *comment_id,
                 },
                 bincode::config::standard(),
             )
@@ -150,10 +149,12 @@ pub fn like_image(
         ehttp::Request::post(
             format!("http://{host}/imageliked"),
             encode_to_vec(
-                &TokenUuidLikedPacket {
+                &NetworkPacket {
                     token: token.to_string(),
-                    uuid: *image_id,
-                    liked,
+                    data: LikeBody {
+                        uuid: *image_id,
+                        liked,
+                    },
                 },
                 bincode::config::standard(),
             )
@@ -175,9 +176,9 @@ pub fn remove_image(
         ehttp::Request::post(
             format!("http://{host}/imageremove"),
             encode_to_vec(
-                &TokenUuidPacket {
+                &NetworkPacket {
                     token: token.to_string(),
-                    uuid: *image_id,
+                    data: *image_id,
                 },
                 bincode::config::standard(),
             )
@@ -199,9 +200,9 @@ pub fn recreate_image(
         ehttp::Request::post(
             format!("http://{host}/imagerecreate"),
             encode_to_vec(
-                &TokenUuidPacket {
+                &NetworkPacket {
                     token: token.to_string(),
-                    uuid: *image_id,
+                    data: *image_id,
                 },
                 bincode::config::standard(),
             )
@@ -224,10 +225,12 @@ pub fn edit_styles(
         ehttp::Request::post(
             format!("http://{host}/styles"),
             encode_to_vec(
-                &SetStylePacket {
+                &NetworkPacket {
                     token: token.to_string(),
-                    variant,
-                    string: new.to_string(),
+                    data: StyleBody {
+                        variant,
+                        string: new.to_string(),
+                    },
                 },
                 bincode::config::standard(),
             )
@@ -248,8 +251,9 @@ pub fn query_prompt(
         ehttp::Request::post(
             format!("http://{host}/queryprompt"),
             encode_to_vec(
-                &TokenPacket {
+                &NetworkPacket {
                     token: token.to_string(),
+                    data: (),
                 },
                 bincode::config::standard(),
             )

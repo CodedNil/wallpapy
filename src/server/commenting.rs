@@ -1,139 +1,66 @@
-use crate::common::{
-    CommentData, SetStylePacket, StyleVariant, TokenPacket, TokenStringPacket, TokenUuidPacket,
-};
-use crate::server::{auth::verify_token, gpt, read_database, write_database};
-use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
-use bincode::serde::decode_from_slice;
+use crate::common::{CommentData, NetworkPacket, StyleBody, StyleVariant};
+use crate::server::{decode_and_verify, gpt, with_db};
+use axum::{body::Bytes, http::StatusCode};
 use chrono::Utc;
 use log::error;
 use uuid::Uuid;
 
-pub async fn add(packet: Bytes) -> impl IntoResponse {
-    let packet: TokenStringPacket = match decode_from_slice(&packet, bincode::config::standard()) {
-        Ok((packet, _)) => packet,
-        Err(e) => {
-            error!("Failed to deserialize add_comment packet: {e:?}");
-            return StatusCode::BAD_REQUEST;
-        }
-    };
-    if !verify_token(&packet.token).await.unwrap_or(false) {
-        return StatusCode::UNAUTHORIZED;
-    }
+pub async fn add(packet: Bytes) -> Result<StatusCode, StatusCode> {
+    let pkt: NetworkPacket<String> = decode_and_verify(packet).await?;
 
-    // Store a new database entry
-    let result = async {
-        let mut database = read_database().await?;
-        let id = Uuid::new_v4();
-        let datetime = Utc::now();
-
-        database.comments.insert(
-            id,
+    with_db(|db| {
+        let new_id = Uuid::new_v4();
+        db.comments.insert(
+            new_id,
             CommentData {
-                id,
-                datetime,
-                comment: packet.string,
+                id: new_id,
+                datetime: Utc::now(),
+                comment: pkt.data,
             },
         );
+        Ok(())
+    })
+    .await?;
 
-        write_database(&database).await
-    }
-    .await;
-
-    match result {
-        Ok(()) => StatusCode::OK,
-        Err(e) => {
-            error!("Errored add_comment {e:?}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
-    }
+    Ok(StatusCode::OK)
 }
 
-pub async fn remove(packet: Bytes) -> impl IntoResponse {
-    let packet: TokenUuidPacket = match decode_from_slice(&packet, bincode::config::standard()) {
-        Ok((packet, _)) => packet,
-        Err(e) => {
-            error!("Failed to deserialize remove_comment packet: {e:?}");
-            return StatusCode::BAD_REQUEST;
-        }
-    };
-    if !verify_token(&packet.token).await.unwrap_or(false) {
-        return StatusCode::UNAUTHORIZED;
-    }
+pub async fn remove(packet: Bytes) -> Result<StatusCode, StatusCode> {
+    let pkt: NetworkPacket<Uuid> = decode_and_verify(packet).await?;
 
-    // Remove the database entry
-    let result = async {
-        let mut database = read_database().await?;
-        database.comments.retain(|id, _| *id != packet.uuid);
-        write_database(&database).await
-    }
-    .await;
+    with_db(|db| {
+        db.comments.retain(|id, _| *id != pkt.data);
+        Ok(())
+    })
+    .await?;
 
-    match result {
-        Ok(()) => StatusCode::OK,
-        Err(e) => {
-            error!("Errored remove_comment {e:?}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
-    }
+    Ok(StatusCode::OK)
 }
 
-pub async fn styles(packet: Bytes) -> impl IntoResponse {
-    let packet: SetStylePacket = match decode_from_slice(&packet, bincode::config::standard()) {
-        Ok((packet, _)) => packet,
-        Err(e) => {
-            error!("Failed to deserialize styles packet: {e:?}");
-            return StatusCode::BAD_REQUEST;
-        }
-    };
-    if !verify_token(&packet.token).await.unwrap_or(false) {
-        return StatusCode::UNAUTHORIZED;
-    }
+pub async fn styles(packet: Bytes) -> Result<StatusCode, StatusCode> {
+    let pkt: NetworkPacket<StyleBody> = decode_and_verify(packet).await?;
 
-    let result = async {
-        let mut database = read_database().await?;
-        match packet.variant {
-            StyleVariant::Style => {
-                database.style.style = packet.string;
-            }
-            StyleVariant::Contents => {
-                database.style.contents = packet.string;
-            }
-            StyleVariant::NegativeContents => {
-                database.style.negative_contents = packet.string;
-            }
+    with_db(|db| {
+        match pkt.data.variant {
+            StyleVariant::Style => &mut db.style.style,
+            StyleVariant::Contents => &mut db.style.contents,
+            StyleVariant::NegativeContents => &mut db.style.negative_contents,
         }
-        write_database(&database).await
-    }
-    .await;
+        .clone_from(&pkt.data.string);
+        Ok(())
+    })
+    .await?;
 
-    match result {
-        Ok(()) => StatusCode::OK,
-        Err(e) => {
-            error!("Errored styles {e:?}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
-    }
+    Ok(StatusCode::OK)
 }
 
-pub async fn query_prompt(packet: Bytes) -> impl IntoResponse {
-    let packet: TokenPacket = match decode_from_slice(&packet, bincode::config::standard()) {
-        Ok((packet, _)) => packet,
-        Err(e) => {
-            error!("Failed to deserialize query_prompt packet: {e:?}");
-            return (StatusCode::BAD_REQUEST, String::new());
-        }
-    };
-    if !verify_token(&packet.token).await.unwrap_or(false) {
-        return (StatusCode::UNAUTHORIZED, String::new());
-    }
+pub async fn query_prompt(packet: Bytes) -> Result<(StatusCode, String), StatusCode> {
+    let _: NetworkPacket<()> = decode_and_verify(packet).await?;
 
     // Query GPT for the prompt it would send to create an image
-    let generate_result = gpt::generate_prompt().await;
-    match generate_result {
-        Ok((request_body, _)) => (StatusCode::OK, request_body),
-        Err(e) => {
-            error!("Errored query_prompt {e:?}");
-            (StatusCode::INTERNAL_SERVER_ERROR, String::new())
-        }
-    }
+    let (body, _) = gpt::generate_prompt().await.map_err(|e| {
+        error!("gpt error: {e:?}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    Ok((StatusCode::OK, body))
 }
