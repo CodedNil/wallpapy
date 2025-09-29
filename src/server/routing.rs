@@ -58,10 +58,10 @@ pub async fn start_server() {
                     "Time since last wallpaper: {}",
                     format_duration(cur_time - latest_time)
                 );
-                if cur_time - latest_time > NEW_WALLPAPER_INTERVAL {
-                    if let Err(e) = image::generate_wallpaper_impl(None, None).await {
-                        error!("Error generating wallpaper: {e:?}");
-                    }
+                if cur_time - latest_time > NEW_WALLPAPER_INTERVAL
+                    && let Err(e) = image::generate_wallpaper_impl(None, None).await
+                {
+                    error!("Error generating wallpaper: {e:?}");
                 }
             }
             Err(e) => error!("{e:?}"),

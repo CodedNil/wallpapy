@@ -1,8 +1,10 @@
-use crate::WALLPAPERS_DIR;
-use crate::common::{
-    ColorData, ImageFile, LikeBody, LikedState, NetworkPacket, PromptData, WallpaperData,
+use crate::{
+    WALLPAPERS_DIR,
+    common::{
+        ColorData, ImageFile, LikeBody, LikedState, NetworkPacket, PromptData, WallpaperData,
+    },
+    server::{decode_and_verify, gpt, read_database, with_db, write_database},
 };
-use crate::server::{decode_and_verify, gpt, read_database, with_db, write_database};
 use anyhow::{Result, anyhow};
 use axum::{
     body::Bytes,

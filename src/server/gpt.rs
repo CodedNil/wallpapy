@@ -1,15 +1,15 @@
-use crate::common::{Database, DatabaseStyle, LikedState, PromptData};
-use crate::server::read_database;
+use crate::{
+    common::{Database, DatabaseStyle, LikedState, PromptData},
+    server::read_database,
+};
 use anyhow::{Result, anyhow};
 use log::error;
 use reqwest::{
     Client,
     header::{CONTENT_TYPE, HeaderMap, HeaderValue},
 };
-use schemars::generate::SchemaSettings;
-use schemars::{JsonSchema, SchemaGenerator};
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use schemars::{JsonSchema, SchemaGenerator, generate::SchemaSettings};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use std::{collections::HashMap, env, error::Error, sync::LazyLock};
 
@@ -103,7 +103,9 @@ where
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 struct DiscardedSummary {
-    /// Summary of the users loved descriptions, do not include common things like seasons, time of day etc. do not repeat similar items and err on the side of fewer items, ideally 2-4 word per item, max 7 words per item if needed
+    /// Summary of the users loved descriptions, do not include common things like seasons, time of
+    /// day etc. do not repeat similar items and err on the side of fewer items, ideally 2-4 word
+    /// per item, max 7 words per item if needed
     loved: Vec<String>,
     /// Summary of the users liked descriptions, same rules as for loved
     liked: Vec<String>,
@@ -135,7 +137,7 @@ pub async fn generate_prompt() -> Result<(String, DatabaseStyle)> {
                 .map(|comment| (comment.datetime, None, Some(comment))),
         )
         .collect::<Vec<_>>();
-    database_history.sort_by_key(|(datetime, _, _)| *datetime);
+    database_history.sort_by_key(|(datetime, ..)| *datetime);
 
     let mut history_string = Vec::new();
     let mut discarded: HashMap<LikedState, Vec<String>> = HashMap::new();
@@ -164,10 +166,10 @@ pub async fn generate_prompt() -> Result<(String, DatabaseStyle)> {
                     .push(wallpaper.prompt_data.shortened_prompt.clone());
             }
         }
-        if let Some(comment) = comment {
-            if i < 10 {
-                history_string.push(format!("User commented: '{}'", comment.comment));
-            }
+        if let Some(comment) = comment
+            && i < 10
+        {
+            history_string.push(format!("User commented: '{}'", comment.comment));
         }
     }
 
@@ -244,5 +246,5 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
         format!("Create me a new image prompt, {user_message}\nPrompt:"),
     )
     .await
-    .map_err(|err| anyhow!("Failed to generate prompt: {}", err))
+    .map_err(|err| anyhow!("Failed to generate prompt: {err}"))
 }

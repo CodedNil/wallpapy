@@ -422,7 +422,8 @@ impl Wallpapy {
                             }
                         }
                     } else if let Some(database) = self.database.clone() {
-                        // Collect the wallpapers and comments into a single list, sorted by datetime
+                        // Collect the wallpapers and comments into a single list, sorted by
+                        // datetime
                         let mut combined_list = database
                             .wallpapers
                             .values()
@@ -445,7 +446,7 @@ impl Wallpapy {
                                     .map(|comment| (comment.datetime, None, Some(comment))),
                             )
                             .collect::<Vec<_>>();
-                        combined_list.sort_by_key(|(datetime, _, _)| *datetime);
+                        combined_list.sort_by_key(|(datetime, ..)| *datetime);
                         let combined_list = combined_list;
 
                         let available_width = ui.available_width();

@@ -87,8 +87,8 @@ fn format_duration(duration: Duration) -> String {
     let weeks = duration.num_weeks();
 
     match (weeks, days, hours, minutes) {
-        (w, _, _, _) if w >= 1 => format!("{} week{}", w, if w == 1 { "" } else { "s" }),
-        (_, d, _, _) if d >= 1 => format!("{} day{}", d, if d == 1 { "" } else { "s" }),
+        (w, ..) if w >= 1 => format!("{} week{}", w, if w == 1 { "" } else { "s" }),
+        (_, d, ..) if d >= 1 => format!("{} day{}", d, if d == 1 { "" } else { "s" }),
         (_, _, h, _) if h >= 1 => format!("{} hour{}", h, if h == 1 { "" } else { "s" }),
         (_, _, _, m) if m >= 1 => format!("{} minute{}", m, if m == 1 { "" } else { "s" }),
         _ => "less than a minute".to_string(),

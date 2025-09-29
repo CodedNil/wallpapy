@@ -15,6 +15,7 @@ use tokio::{
     fs::{self, OpenOptions},
     io::AsyncReadExt,
 };
+
 use uuid::Uuid;
 
 const MIN_PASSWORD_LENGTH: usize = 6;
@@ -83,8 +84,7 @@ async fn login_impl(packet: &LoginPacket) -> Result<String> {
     if accounts.is_empty() {
         if packet.password.len() < MIN_PASSWORD_LENGTH {
             return Err(anyhow!(
-                "Password must be at least {} characters long",
-                MIN_PASSWORD_LENGTH
+                "Password must be at least {MIN_PASSWORD_LENGTH} characters long"
             ));
         }
 

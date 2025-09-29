@@ -39,7 +39,7 @@ fn send<T, R>(
                     resp.status,
                     resp.text().unwrap_or_default()
                 )),
-                Err(e) => Err(anyhow!("Network error: {}", e)),
+                Err(e) => Err(anyhow!("Network error: {e}")),
             };
             on_done(result);
         }),

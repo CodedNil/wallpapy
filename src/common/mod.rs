@@ -62,7 +62,8 @@ pub struct ImageFile {
 pub struct PromptData {
     /// The prompt to send to the image generator
     pub prompt: String,
-    /// A shortened version of the prompt, only including the image description not style, aim for 6 words, max 20 words
+    /// A shortened version of the prompt, only including the image description not style, aim for
+    /// 6 words, max 20 words
     pub shortened_prompt: String,
 }
 
@@ -108,9 +109,6 @@ impl<T> HasToken for NetworkPacket<T> {
         &self.token
     }
 }
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct EmptyBody;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct LikeBody {
