@@ -71,7 +71,7 @@ enum GetDatabaseState {
 }
 
 bitflags! {
-    #[derive(Clone)]
+    #[derive(Clone, Copy)]
     pub struct StateFilter: u32 {
         const LIKED    = 0b00001;
         const LOVED    = 0b00010;
@@ -443,7 +443,6 @@ impl Wallpapy {
                             )
                             .collect::<Vec<_>>();
                         combined_list.sort_by_key(|(datetime, ..)| *datetime);
-                        let combined_list = combined_list;
 
                         let available_width = ui.available_width();
                         let spacing = ui.spacing().item_spacing;
@@ -913,7 +912,7 @@ impl Wallpapy {
                 ..Default::default()
             })
             .show(ctx, |_| {
-                Window::new("Login Form".to_string())
+                Window::new("Login Form")
                     .fixed_pos(ctx.screen_rect().center())
                     .fixed_size([300.0, 0.0])
                     .pivot(Align2::CENTER_CENTER)
@@ -962,17 +961,10 @@ impl Wallpapy {
             LoginState::Done(response) => {
                 match response {
                     Ok(response) => {
-                        if response.contains('|') {
-                            // Split token on | to get message and token separately
-                            let split: Vec<&str> = response.split('|').collect();
-                            let message = split[0];
-                            let token = split[1];
-
+                        if let Some((message, token)) = response.split_once('|') {
                             self.toasts.lock().info(message);
-
                             self.stored.auth_token = token.to_string();
                         } else {
-                            // If no | is found, treat the entire response as the token
                             self.stored.auth_token.clone_from(response);
                         }
                     }
@@ -992,19 +984,17 @@ fn button_pressed_result(
     toasts_store: &Arc<Mutex<Toasts>>,
     success_str: &str,
 ) {
-    match result {
-        Ok(()) => {
-            if !success_str.is_empty() {
-                toasts_store.lock().success(success_str);
-            }
-            network_store.lock().get_database = GetDatabaseState::Wanted;
-        }
-        Err(e) => {
-            toasts_store
-                .lock()
-                .error(format!("Failed to submit request: {e}"));
-        }
+    if let Err(e) = result {
+        toasts_store
+            .lock()
+            .error(format!("Failed to submit request: {e}"));
+        return;
     }
+
+    if !success_str.is_empty() {
+        toasts_store.lock().success(success_str);
+    }
+    network_store.lock().get_database = GetDatabaseState::Wanted;
 }
 
 fn render_statefilter_button(
@@ -1013,7 +1003,7 @@ fn render_statefilter_button(
     flag: StateFilter,
     label: &str,
 ) {
-    let is_active = state.contains(flag.clone());
+    let is_active = state.contains(flag);
 
     let button = egui::Button::new(label).fill(if is_active {
         egui::Color32::DARK_BLUE

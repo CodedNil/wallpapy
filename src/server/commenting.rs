@@ -28,7 +28,7 @@ pub async fn remove(packet: Bytes) -> Result<StatusCode, StatusCode> {
     let pkt: NetworkPacket<Uuid> = decode_and_verify(packet).await?;
 
     with_db(|db| {
-        db.comments.retain(|id, _| *id != pkt.data);
+        db.comments.remove(&pkt.data);
         Ok(())
     })
     .await?;

@@ -27,14 +27,17 @@ const TIMEOUT: u64 = 360;
 pub async fn generate(packet: Bytes) -> Result<StatusCode, StatusCode> {
     let pkt: NetworkPacket<String> = decode_and_verify(packet).await?;
 
-    let prompt = (!pkt.data.is_empty()).then_some(pkt.data);
-    generate_wallpaper_impl(None, prompt)
-        .await
-        .map(|()| StatusCode::OK)
-        .map_err(|e| {
-            error!("Failed to generate wallpaper: {e:?}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })
+    let prompt = if pkt.data.is_empty() {
+        None
+    } else {
+        Some(pkt.data)
+    };
+    if let Err(e) = generate_wallpaper_impl(None, prompt).await {
+        error!("Failed to generate wallpaper: {e:?}");
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    Ok(StatusCode::OK)
 }
 
 pub async fn latest() -> Result<impl IntoResponse, StatusCode> {
@@ -44,14 +47,10 @@ pub async fn latest() -> Result<impl IntoResponse, StatusCode> {
     })?;
 
     // Find latest wallpaper by datetime
-    let wallpaper = db
-        .wallpapers
-        .into_values()
-        .max_by_key(|w| w.datetime)
-        .ok_or_else(|| {
-            error!("No wallpapers found");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let Some(wallpaper) = db.wallpapers.into_values().max_by_key(|w| w.datetime) else {
+        error!("No wallpapers found");
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    };
     let file_name = wallpaper.image_file.file_name;
 
     let image_path = Path::new(WALLPAPERS_DIR).join(&file_name);
@@ -78,15 +77,15 @@ pub async fn favourites() -> Result<impl IntoResponse, StatusCode> {
     // Find random liked wallpaper
     let file_name = {
         let mut rng = rand::rng();
-        let wallpaper = db
+        let Some(wallpaper) = db
             .wallpapers
             .into_values()
             .filter(|w| matches!(w.liked_state, LikedState::Liked))
             .choose(&mut rng)
-            .ok_or_else(|| {
-                error!("No liked wallpapers found");
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
+        else {
+            error!("No liked wallpapers found");
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        };
         wallpaper.image_file.file_name
     };
 
@@ -110,12 +109,10 @@ pub async fn smartget() -> Result<impl IntoResponse, StatusCode> {
     let hour = now.hour();
 
     // Define acceptable brightness range based on the time of day.
-    let acceptable_brightness_range = if (hour > 6 && hour < 10) || hour > 16 && hour < 22 {
-        (0.3, 0.6)
-    } else if (10..=16).contains(&hour) {
-        (0.5, 1.0)
-    } else {
-        (0.0, 0.55)
+    let acceptable_brightness_range = match hour {
+        7..=9 | 17..=21 => (0.3, 0.6),
+        10..=16 => (0.5, 1.0),
+        _ => (0.0, 0.55),
     };
 
     let db = read_database().await.map_err(|e| {
@@ -126,7 +123,7 @@ pub async fn smartget() -> Result<impl IntoResponse, StatusCode> {
     // Find random wallpaper that meets the criteria
     let file_name = {
         let mut rng = rand::rng();
-        let wallpaper = db
+        let Some(wallpaper) = db
             .wallpapers
             .into_values()
             .filter(|wallpaper| {
@@ -137,10 +134,10 @@ pub async fn smartget() -> Result<impl IntoResponse, StatusCode> {
                         <= acceptable_brightness_range.1
             })
             .choose(&mut rng)
-            .ok_or_else(|| {
-                error!("No liked wallpapers found");
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
+        else {
+            error!("No liked wallpapers found");
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        };
         wallpaper.image_file.file_name
     };
 
@@ -162,13 +159,12 @@ pub async fn smartget() -> Result<impl IntoResponse, StatusCode> {
 pub async fn remove(packet: Bytes) -> Result<StatusCode, StatusCode> {
     let pkt: NetworkPacket<Uuid> = decode_and_verify(packet).await?;
 
-    remove_wallpaper_impl(pkt)
-        .await
-        .map(|()| StatusCode::OK)
-        .map_err(|e| {
-            error!("Failed to remove wallpaper: {e:?}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })
+    if let Err(e) = remove_wallpaper_impl(pkt).await {
+        error!("Failed to remove wallpaper: {e:?}");
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    Ok(StatusCode::OK)
 }
 
 pub async fn like(packet: Bytes) -> Result<StatusCode, StatusCode> {
@@ -176,17 +172,18 @@ pub async fn like(packet: Bytes) -> Result<StatusCode, StatusCode> {
 
     // Set the vote state
     with_db(|db| {
-        if let Some(wallpaper) = db.wallpapers.get_mut(&pkt.data.uuid) {
-            wallpaper.liked_state = if wallpaper.liked_state == pkt.data.liked {
-                LikedState::Neutral
-            } else {
-                pkt.data.liked
-            };
-            Ok(StatusCode::OK)
-        } else {
+        let Some(wallpaper) = db.wallpapers.get_mut(&pkt.data.uuid) else {
             error!("Like: wallpaper not found {}", pkt.data.uuid);
-            Err(StatusCode::NOT_FOUND)
-        }
+            return Err(StatusCode::NOT_FOUND);
+        };
+
+        wallpaper.liked_state = if wallpaper.liked_state == pkt.data.liked {
+            LikedState::Neutral
+        } else {
+            pkt.data.liked
+        };
+
+        Ok(StatusCode::OK)
     })
     .await
 }
@@ -209,13 +206,12 @@ pub async fn recreate(packet: Bytes) -> Result<StatusCode, StatusCode> {
             StatusCode::NOT_FOUND
         })?;
 
-    generate_wallpaper_impl(Some(prompt_data), None)
-        .await
-        .map(|()| StatusCode::OK)
-        .map_err(|e| {
-            error!("Failed to recreate image: {e:?}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })
+    if let Err(e) = generate_wallpaper_impl(Some(prompt_data), None).await {
+        error!("Failed to recreate image: {e:?}");
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    Ok(StatusCode::OK)
 }
 
 pub async fn generate_wallpaper_impl(
@@ -339,10 +335,18 @@ fn calculate_color_data(img: &DynamicImage) -> ColorData {
 
     // Compute brightness percentiles
     brightness_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let top_20_percent_brightness =
-        brightness_values[(brightness_values.len() as f32 * 0.80).ceil() as usize - 1];
-    let bottom_20_percent_brightness =
-        brightness_values[(brightness_values.len() as f32 * 0.20).floor() as usize];
+    let (top_20_percent_brightness, bottom_20_percent_brightness) = if brightness_values.is_empty()
+    {
+        (0.0, 0.0)
+    } else {
+        let len = brightness_values.len();
+        let top_index = ((len as f32) * 0.80).ceil() as usize - 1;
+        let bottom_index = ((len as f32) * 0.20).floor() as usize;
+        (
+            brightness_values[top_index.min(len - 1)],
+            brightness_values[bottom_index.min(len - 1)],
+        )
+    };
 
     // Calculate contrast ratio
     let contrast_ratio = (top_20_percent_brightness + 0.05) / (bottom_20_percent_brightness + 0.05);
@@ -363,27 +367,26 @@ fn calculate_color_data(img: &DynamicImage) -> ColorData {
 fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     let max = r.max(g).max(b);
     let min = r.min(g).min(b);
-    let lightness = min.midpoint(max);
+    let lightness = (max + min) * 0.5;
+    let delta = max - min;
 
-    let mut hue = 0.0;
-    let mut saturation = 0.0;
-    if (max - min).abs() > f32::EPSILON {
-        let d = max - min;
-        saturation = if lightness > 0.5 {
-            d / (2.0 - d)
-        } else {
-            d / (max + min)
-        };
-
-        if (max - r).abs() > f32::EPSILON {
-            hue = (g - b) / d + if g < b { 6.0 } else { 0.0 };
-        } else if (max - g).abs() > f32::EPSILON {
-            hue = (b - r) / d + 2.0;
-        } else {
-            hue = (r - g) / d + 4.0;
-        }
-        hue /= 6.0;
+    if delta.abs() < f32::EPSILON {
+        return (0.0, 0.0, lightness);
     }
+
+    let saturation = if lightness > 0.5 {
+        delta / (2.0 - max - min)
+    } else {
+        delta / (max + min)
+    };
+
+    let hue = if (max - r).abs() < f32::EPSILON {
+        ((g - b) / delta + if g < b { 6.0 } else { 0.0 }) / 6.0
+    } else if (max - g).abs() < f32::EPSILON {
+        ((b - r) / delta + 2.0) / 6.0
+    } else {
+        ((r - g) / delta + 4.0) / 6.0
+    };
 
     (hue, saturation, lightness)
 }
@@ -403,8 +406,8 @@ async fn remove_wallpaper_impl(packet: NetworkPacket<Uuid>) -> Result<()> {
 
     // Remove all associated files
     for file_name in [
-        wallpaper.image_file.file_name,
-        wallpaper.thumbnail_file.file_name,
+        &wallpaper.image_file.file_name,
+        &wallpaper.thumbnail_file.file_name,
     ] {
         let file_path = Path::new(WALLPAPERS_DIR).join(file_name);
         if file_path.exists() {
@@ -462,9 +465,10 @@ async fn replicate_request_prediction(
     } else {
         model
     };
+    let auth_header = format!("Bearer {api_token}");
     let response = client
         .post(url)
-        .header("Authorization", format!("Bearer {api_token}"))
+        .header("Authorization", &auth_header)
         .header("Content-Type", "application/json")
         .json(input_json)
         .send()
@@ -479,7 +483,7 @@ async fn replicate_request_prediction(
     for _ in 0..TIMEOUT {
         let status_response = client
             .get(status_url.clone())
-            .header("Authorization", format!("Bearer {api_token}"))
+            .header("Authorization", &auth_header)
             .header("Content-Type", "application/json")
             .send()
             .await?;

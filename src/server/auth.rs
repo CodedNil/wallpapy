@@ -39,17 +39,21 @@ struct Token {
 type Accounts = HashMap<Uuid, Account>;
 
 pub async fn login_server(packet: Bytes) -> impl IntoResponse {
-    match decode_from_slice::<LoginPacket, Configuration>(&packet, bincode::config::standard()) {
-        Ok((packet, _)) => match login_impl(&packet).await {
-            Ok(token) => (StatusCode::OK, token),
+    let (packet, _) =
+        match decode_from_slice::<LoginPacket, Configuration>(&packet, bincode::config::standard())
+        {
+            Ok(value) => value,
             Err(e) => {
-                error!("Failed to login: {e:?}");
-                (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+                error!("Failed to deserialise login packet: {e:?}");
+                return (StatusCode::BAD_REQUEST, String::new());
             }
-        },
+        };
+
+    match login_impl(&packet).await {
+        Ok(token) => (StatusCode::OK, token),
         Err(e) => {
-            error!("Failed to deserialise login packet: {e:?}");
-            (StatusCode::BAD_REQUEST, String::new())
+            error!("Failed to login: {e:?}");
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
         }
     }
 }
@@ -113,51 +117,50 @@ async fn login_impl(packet: &LoginPacket) -> Result<String> {
         return Ok(format!("Admin Account Created|{token}"));
     }
 
-    // Retrieve account data using username as the key
-    let account = accounts
+    let Some(account) = accounts
         .values_mut()
-        .find(|acc| acc.username == packet.username);
-    if let Some(account) = account {
-        if account.password_hash.is_empty() {
-            // This is a new account setup case
-            if packet.password.len() < MIN_PASSWORD_LENGTH {
-                return Err(anyhow!("Password must be at least 6 characters long"));
-            }
+        .find(|acc| acc.username == packet.username)
+    else {
+        return Err(anyhow!("Incorrect username or password"));
+    };
 
-            // Hash the new password
-            let password_hash = Argon2::default()
-                .hash_password(
-                    packet.password.as_bytes(),
-                    &SaltString::generate(&mut OsRng),
-                )
-                .map_err(|_| anyhow!("Failed to hash password"))?
-                .to_string();
-
-            // Update the account with the new password and add a token
-            let (token_entry, token) = generate_token();
-            account.tokens.push(token_entry);
-            account.password_hash = password_hash;
-
-            write_accounts(&accounts).await?;
-
-            return Ok(format!("Admin Set|{token}"));
+    if account.password_hash.is_empty() {
+        if packet.password.len() < MIN_PASSWORD_LENGTH {
+            return Err(anyhow!(
+                "Password must be at least {MIN_PASSWORD_LENGTH} characters long"
+            ));
         }
 
-        // Verify password for an existing account
-        let parsed_hash = PasswordHash::new(&account.password_hash)
-            .map_err(|_| anyhow!("Incorrect username or password"))?;
+        let password_hash = Argon2::default()
+            .hash_password(
+                packet.password.as_bytes(),
+                &SaltString::generate(&mut OsRng),
+            )
+            .map_err(|_| anyhow!("Failed to hash password"))?
+            .to_string();
 
-        if Argon2::default()
-            .verify_password(packet.password.as_bytes(), &parsed_hash)
-            .is_ok()
-        {
-            let (token_entry, token) = generate_token();
-            account.tokens.push(token_entry);
-            write_accounts(&accounts).await?;
-            return Ok(token);
-        }
+        let (token_entry, token) = generate_token();
+        account.tokens.push(token_entry);
+        account.password_hash = password_hash;
+        write_accounts(&accounts).await?;
+
+        return Ok(format!("Admin Set|{token}"));
     }
-    Err(anyhow!("Incorrect username or password"))
+
+    let parsed_hash = PasswordHash::new(&account.password_hash)
+        .map_err(|_| anyhow!("Incorrect username or password"))?;
+
+    if Argon2::default()
+        .verify_password(packet.password.as_bytes(), &parsed_hash)
+        .is_err()
+    {
+        return Err(anyhow!("Incorrect username or password"));
+    }
+
+    let (token_entry, token) = generate_token();
+    account.tokens.push(token_entry);
+    write_accounts(&accounts).await?;
+    Ok(token)
 }
 
 /// Helper function to generate a random token

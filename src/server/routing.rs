@@ -28,14 +28,16 @@ pub fn setup_routes(app: Router) -> Router {
 }
 
 pub async fn get_database() -> impl IntoResponse {
-    match read_database().await {
-        Ok(database) => match encode_to_vec(&database, bincode::config::standard()) {
-            Ok(data) => (StatusCode::OK, data).into_response(),
-            Err(e) => {
-                error!("{e:?}");
-                StatusCode::INTERNAL_SERVER_ERROR.into_response()
-            }
-        },
+    let database = match read_database().await {
+        Ok(database) => database,
+        Err(e) => {
+            error!("{e:?}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    match encode_to_vec(&database, bincode::config::standard()) {
+        Ok(data) => (StatusCode::OK, data).into_response(),
         Err(e) => {
             error!("{e:?}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -47,17 +49,18 @@ pub async fn start_server() {
     loop {
         match read_database().await {
             Ok(database) => {
-                // Generate a new wallpaper every NEW_WALLPAPER_INTERVAL
                 let cur_time = Utc::now();
                 let latest_time = database
                     .wallpapers
-                    .iter()
-                    .max_by_key(|(_, wallpaper)| wallpaper.datetime)
-                    .map_or(cur_time, |(_, wallpaper)| wallpaper.datetime);
+                    .values()
+                    .max_by_key(|wallpaper| wallpaper.datetime)
+                    .map_or(cur_time, |wallpaper| wallpaper.datetime);
+
                 info!(
                     "Time since last wallpaper: {}",
                     format_duration(cur_time - latest_time)
                 );
+
                 if cur_time - latest_time > NEW_WALLPAPER_INTERVAL
                     && let Err(e) = image::generate_wallpaper_impl(None, None).await
                 {
