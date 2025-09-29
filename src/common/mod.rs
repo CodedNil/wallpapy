@@ -33,8 +33,7 @@ pub struct WallpaperData {
     pub datetime: DateTime<Utc>,
 
     pub prompt_data: PromptData,
-    pub original_file: ImageFile,
-    pub upscaled_file: Option<ImageFile>,
+    pub image_file: ImageFile,
     pub color_data: ColorData,
 
     pub thumbnail_file: ImageFile,

@@ -26,7 +26,7 @@ impl Model {
     const fn as_str(&self) -> &'static str {
         match self {
             Self::Gemini25Flash => "gemini-2.5-flash",
-            Self::Gemini25FlashLite => "gemini-2.5-flash-lite-preview-06-17",
+            Self::Gemini25FlashLite => "gemini-2.5-flash-lite",
         }
     }
 }
@@ -145,9 +145,9 @@ pub async fn generate_prompt() -> Result<(String, DatabaseStyle)> {
     for (i, (_, wallpaper, comment)) in database_history.iter().rev().enumerate() {
         if let Some(wallpaper) = wallpaper {
             if i < match wallpaper.liked_state {
-                LikedState::Loved => 30,
-                LikedState::Liked | LikedState::Disliked => 15,
-                LikedState::Neutral => 10,
+                LikedState::Loved => 60,
+                LikedState::Liked | LikedState::Disliked => 30,
+                LikedState::Neutral => 20,
             } {
                 history_string.push(format!(
                     "{}'{}'",
@@ -159,7 +159,7 @@ pub async fn generate_prompt() -> Result<(String, DatabaseStyle)> {
                     },
                     wallpaper.prompt_data.shortened_prompt
                 ));
-            } else if i < 60 {
+            } else if i < 100 {
                 discarded
                     .entry(wallpaper.liked_state)
                     .or_default()
@@ -167,7 +167,7 @@ pub async fn generate_prompt() -> Result<(String, DatabaseStyle)> {
             }
         }
         if let Some(comment) = comment
-            && i < 10
+            && i < 30
         {
             history_string.push(format!("User commented: '{}'", comment.comment));
         }
@@ -175,13 +175,21 @@ pub async fn generate_prompt() -> Result<(String, DatabaseStyle)> {
 
     // Use LLM to summarize the discarded string into the key elements
     if discarded.values().any(|v| !v.is_empty()) {
-        let summary_text = format!(
-            "Loved items: {}\nLiked items: {}\nDisliked items: {}\nOther items: {}",
-            discarded.get(&LikedState::Loved).unwrap().join(", "),
-            discarded.get(&LikedState::Liked).unwrap().join(", "),
-            discarded.get(&LikedState::Disliked).unwrap().join(", "),
-            discarded.get(&LikedState::Neutral).unwrap().join(", "),
-        );
+        let summary_text = [
+            (LikedState::Loved, "Loved items"),
+            (LikedState::Liked, "Liked items"),
+            (LikedState::Disliked, "Disliked items"),
+            (LikedState::Neutral, "Other items"),
+        ]
+        .iter()
+        .filter_map(|(state, label)| {
+            discarded
+                .get(state)
+                .filter(|items| !items.is_empty())
+                .map(|items| format!("{}: {}", label, items.join(", ")))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
         match llm_parse::<DiscardedSummary>(
             vec![],
             LLMSettings {

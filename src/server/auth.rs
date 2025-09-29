@@ -15,7 +15,6 @@ use tokio::{
     fs::{self, OpenOptions},
     io::AsyncReadExt,
 };
-
 use uuid::Uuid;
 
 const MIN_PASSWORD_LENGTH: usize = 6;

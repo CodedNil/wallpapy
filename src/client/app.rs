@@ -323,14 +323,10 @@ impl Wallpapy {
                         })
                     });
                     if let Some(wallpaper) = &wallpaper {
-                        let file = wallpaper
-                            .upscaled_file
-                            .as_ref()
-                            .map_or(&wallpaper.original_file, |upscaled_file| upscaled_file);
                         ui.vertical(|ui| {
                             Image::new(format!(
                                 "http://{}/wallpapers/{}",
-                                self.host, file.file_name
+                                self.host, wallpaper.image_file.file_name
                             ))
                             .show_loading_spinner(false)
                             .corner_radius(16.0)

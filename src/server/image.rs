@@ -11,12 +11,8 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode},
     response::IntoResponse,
 };
-use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::{Timelike, Utc};
-use image::{
-    DynamicImage, GenericImageView, ImageReader, Pixel, codecs::jpeg::JpegEncoder,
-    imageops::FilterType,
-};
+use image::{DynamicImage, GenericImageView, ImageReader, Pixel, imageops::FilterType};
 use log::{error, info};
 use rand::seq::IteratorRandom;
 use reqwest::Client;
@@ -56,12 +52,9 @@ pub async fn latest() -> Result<impl IntoResponse, StatusCode> {
             error!("No wallpapers found");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
-    let file_name = wallpaper
-        .upscaled_file
-        .as_ref()
-        .map_or(&wallpaper.original_file.file_name, |f| &f.file_name);
+    let file_name = wallpaper.image_file.file_name;
 
-    let image_path = Path::new(WALLPAPERS_DIR).join(file_name);
+    let image_path = Path::new(WALLPAPERS_DIR).join(&file_name);
     let data = fs::read(&image_path).await.map_err(|e| {
         error!("Failed to read image file {file_name:?}: {e:?}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -94,11 +87,7 @@ pub async fn favourites() -> Result<impl IntoResponse, StatusCode> {
                 error!("No liked wallpapers found");
                 StatusCode::INTERNAL_SERVER_ERROR
             })?;
-        wallpaper
-            .upscaled_file
-            .as_ref()
-            .map_or(&wallpaper.original_file.file_name, |f| &f.file_name)
-            .clone()
+        wallpaper.image_file.file_name
     };
 
     let image_path = Path::new(WALLPAPERS_DIR).join(&file_name);
@@ -152,11 +141,7 @@ pub async fn smartget() -> Result<impl IntoResponse, StatusCode> {
                 error!("No liked wallpapers found");
                 StatusCode::INTERNAL_SERVER_ERROR
             })?;
-        wallpaper
-            .upscaled_file
-            .as_ref()
-            .map_or(&wallpaper.original_file.file_name, |f| &f.file_name)
-            .clone()
+        wallpaper.image_file.file_name
     };
 
     let image_path = Path::new(WALLPAPERS_DIR).join(&file_name);
@@ -190,33 +175,20 @@ pub async fn like(packet: Bytes) -> Result<StatusCode, StatusCode> {
     let pkt: NetworkPacket<LikeBody> = decode_and_verify(packet).await?;
 
     // Set the vote state
-    let wallpaper = with_db(|db| {
+    with_db(|db| {
         if let Some(wallpaper) = db.wallpapers.get_mut(&pkt.data.uuid) {
             wallpaper.liked_state = if wallpaper.liked_state == pkt.data.liked {
                 LikedState::Neutral
             } else {
                 pkt.data.liked
             };
-            Ok(wallpaper.clone())
+            Ok(StatusCode::OK)
         } else {
             error!("Like: wallpaper not found {}", pkt.data.uuid);
             Err(StatusCode::NOT_FOUND)
         }
     })
-    .await?;
-
-    // Run the upscaling if the image was liked
-    if wallpaper.upscaled_file.is_none()
-        && matches!(wallpaper.liked_state, LikedState::Liked | LikedState::Loved)
-    {
-        tokio::spawn(async move {
-            if let Err(e) = upscale_wallpaper_impl(pkt.data.uuid, wallpaper).await {
-                error!("Failed to upscale wallpaper: {e:?}");
-            }
-        });
-    }
-
-    Ok(StatusCode::OK)
+    .await
 }
 
 pub async fn recreate(packet: Bytes) -> Result<StatusCode, StatusCode> {
@@ -292,20 +264,20 @@ pub async fn generate_wallpaper_impl(
         &*webp::Encoder::from_image(&image).unwrap().encode(90.0),
     )?;
     // image.save_with_format(dir.join(&file_name), ImageFormat::Avif)?;
-    let original_file = ImageFile {
+    let image_file = ImageFile {
         file_name,
         width: image.width(),
         height: image.height(),
     };
 
-    // Downscale to 480p and save as thumbnail file
-    let thumb_image = image.resize_to_fill(640, 360, FilterType::Lanczos3);
+    // Downscale to thumbnail and save as thumbnail file
+    let thumb_image = image.resize_to_fill(426, 240, FilterType::Lanczos3);
     let thumb_file_name = format!("{datetime_str}_thumb.webp");
     std::fs::write(
         dir.join(&thumb_file_name),
         &*webp::Encoder::from_image(&thumb_image)
             .unwrap()
-            .encode(90.0),
+            .encode(70.0),
     )?;
     // thumb_image.save_with_format(dir.join(&thumb_file_name), ImageFormat::Avif)?;
     let thumbnail_file = ImageFile {
@@ -322,8 +294,7 @@ pub async fn generate_wallpaper_impl(
         datetime,
 
         prompt_data,
-        original_file,
-        upscaled_file: None,
+        image_file,
         color_data,
 
         thumbnail_file,
@@ -332,77 +303,6 @@ pub async fn generate_wallpaper_impl(
     };
 
     // Store a new database entry
-    let mut database = read_database().await?;
-    database.wallpapers.insert(id, wallpaper);
-    write_database(&database).await?;
-
-    Ok(())
-}
-
-pub async fn upscale_wallpaper_impl(id: Uuid, wallpaper: WallpaperData) -> Result<()> {
-    info!("Upscaling wallpaper {id}");
-
-    // Prepare client
-    let client = Client::new();
-    let api_token =
-        env::var("REPLICATE_API_TOKEN").expect("REPLICATE_API_TOKEN environment variable not set");
-
-    // Open image file
-    let image_path = Path::new(WALLPAPERS_DIR).join(wallpaper.original_file.file_name.clone());
-    let image = image::open(&image_path)?;
-
-    // Upscale the image using the high quality upscaler
-    let (upscaled_url, upscaled_image) = upscale_image(&client, &api_token, &image).await?;
-    info!("Upscaled image: {}", &upscaled_url);
-    let upscaled_image = upscaled_image.resize_to_fill(3840, 2160, FilterType::Lanczos3);
-
-    // Save to file
-    let dir = Path::new(WALLPAPERS_DIR);
-    fs::create_dir_all(dir).await?;
-    let datetime_str = wallpaper.datetime.to_rfc3339();
-
-    // Save the upscaled image
-    let upscaled_file_name = format!("{datetime_str}_upscaled.webp");
-    std::fs::write(
-        dir.join(&upscaled_file_name),
-        &*webp::Encoder::from_image(&upscaled_image)
-            .unwrap()
-            .encode(90.0),
-    )?;
-    // upscaled_image.save_with_format(dir.join(&upscaled_file_name), ImageFormat::Avif)?;
-    let upscaled_file = Some(ImageFile {
-        file_name: upscaled_file_name,
-        width: upscaled_image.width(),
-        height: upscaled_image.height(),
-    });
-
-    // Downscale to 480p and save as thumbnail file
-    let thumb_image = upscaled_image.resize_to_fill(640, 360, FilterType::Lanczos3);
-    let thumb_file_name = format!("{datetime_str}_thumb.webp");
-    std::fs::write(
-        dir.join(&thumb_file_name),
-        &*webp::Encoder::from_image(&thumb_image)
-            .unwrap()
-            .encode(90.0),
-    )?;
-    // thumb_image.save_with_format(dir.join(&thumb_file_name), ImageFormat::Avif)?;
-    let thumbnail_file = ImageFile {
-        file_name: thumb_file_name,
-        width: thumb_image.width(),
-        height: thumb_image.height(),
-    };
-
-    // Calculate average color and brightness
-    let color_data = calculate_color_data(&thumb_image);
-
-    let wallpaper = WallpaperData {
-        upscaled_file,
-        color_data,
-        thumbnail_file,
-        ..wallpaper
-    };
-
-    // Update the database entry
     let mut database = read_database().await?;
     database.wallpapers.insert(id, wallpaper);
     write_database(&database).await?;
@@ -502,14 +402,10 @@ async fn remove_wallpaper_impl(packet: NetworkPacket<Uuid>) -> Result<()> {
         .ok_or_else(|| anyhow!("No entry found for UUID"))?;
 
     // Remove all associated files
-    for file_name in vec![
-        Some(&wallpaper.original_file.file_name),
-        Some(&wallpaper.thumbnail_file.file_name),
-        wallpaper.upscaled_file.as_ref().map(|f| &f.file_name),
-    ]
-    .into_iter()
-    .flatten()
-    {
+    for file_name in [
+        wallpaper.image_file.file_name,
+        wallpaper.thumbnail_file.file_name,
+    ] {
         let file_path = Path::new(WALLPAPERS_DIR).join(file_name);
         if file_path.exists() {
             fs::remove_file(file_path).await?;
@@ -522,7 +418,7 @@ async fn remove_wallpaper_impl(packet: NetworkPacket<Uuid>) -> Result<()> {
     Ok(())
 }
 
-/// <https://replicate.com/bytedance/seedream-3>
+/// <https://replicate.com/bytedance/seedream-4>
 async fn image_diffusion(
     client: &Client,
     api_token: &str,
@@ -531,46 +427,17 @@ async fn image_diffusion(
     let result_url = replicate_request_prediction(
         client,
         api_token,
-        "https://api.replicate.com/v1/models/bytedance/seedream-3/predictions",
+        "https://api.replicate.com/v1/models/bytedance/seedream-4/predictions",
         &json!({
             "input": {
                 "prompt": prompt,
-                "size": "big",
-                "aspect_ratio": "custom",
-                "width": 1920,
-                "height": 1080,
-                "guidance_scale": 2.5
-            }
-        }),
-    )
-    .await?;
-
-    let img_data = client.get(&result_url).send().await?.bytes().await?;
-    let img = ImageReader::new(Cursor::new(img_data))
-        .with_guessed_format()?
-        .decode()?;
-
-    Ok((result_url, img))
-}
-
-/// <https://replicate.com/philz1337x/clarity-upscaler>
-async fn upscale_image(
-    client: &Client,
-    api_token: &str,
-    image: &DynamicImage,
-) -> Result<(String, DynamicImage)> {
-    let mut bytes = Vec::new();
-    let encoder = JpegEncoder::new_with_quality(&mut bytes, 90);
-    image.write_with_encoder(encoder)?;
-    let image_uri = format!("data:image/jpeg;base64,{}", STANDARD.encode(&bytes));
-
-    let result_url = replicate_request_prediction(
-        client,
-        api_token,
-        "https://api.replicate.com/v1/models/recraft-ai/recraft-crisp-upscale/predictions",
-        &json!({
-            "input": {
-                "image": image_uri,
+                "size": "custom",
+                "width": 3840,
+                "height": 2160,
+                "max_images": 1,
+                "image_input": [],
+                "aspect_ratio": "4:3",
+                "sequential_image_generation": "disabled"
             }
         }),
     )
