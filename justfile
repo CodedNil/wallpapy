@@ -1,25 +1,9 @@
 default:
-    cargo run --target-dir target/desktop
-
-build-web:
-    RUSTFLAGS="--cfg=web_sys_unstable_apis" , trunk build
-
-build-web-release:
-    RUSTFLAGS="--cfg=web_sys_unstable_apis" , trunk build --release
-
-serve:
+    RUSTFLAGS="--cfg=web_sys_unstable_apis" trunk build
     cargo run --no-default-features --target-dir target/server
 
-serve-release:
-    cargo run --no-default-features --target-dir target/server --release
+build-web:
+    RUSTFLAGS="--cfg=web_sys_unstable_apis" trunk build --release
 
-release:
-    git pull
-    RUSTFLAGS="--cfg=web_sys_unstable_apis" , trunk build --release
-    cargo build --release --no-default-features --target-dir target/server
-    sudo systemctl restart wallpapy
-
-release-server:
-    git pull
-    cargo build --release --no-default-features --target-dir target/server
-    sudo systemctl restart wallpapy
+build-server:
+    cargo build --no-default-features --target-dir target/server --release

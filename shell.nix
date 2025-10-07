@@ -11,8 +11,7 @@ pkgs.mkShell {
     mold
     llvmPackages.bintools
     rustup
-
-    wayland
+    trunk
   ];
   RUSTC_VERSION = overrides.toolchain.channel;
   LIBCLANG_PATH = pkgs.lib.makeLibraryPath [ pkgs.llvmPackages_latest.libclang.lib ];
