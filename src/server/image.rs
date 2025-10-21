@@ -17,7 +17,7 @@ use log::{error, info};
 use rand::seq::IteratorRandom;
 use reqwest::Client;
 use serde_json::json;
-use std::{env, io::Cursor, path::Path, time::Duration};
+use std::{env, io::Cursor, time::Duration};
 use thumbhash::rgba_to_thumb_hash;
 use tokio::fs;
 use uuid::Uuid;
@@ -53,7 +53,7 @@ pub async fn latest() -> Result<impl IntoResponse, StatusCode> {
     };
     let file_name = wallpaper.image_file.file_name;
 
-    let image_path = Path::new(WALLPAPERS_DIR).join(&file_name);
+    let image_path = WALLPAPERS_DIR.join(&file_name);
     let data = fs::read(&image_path).await.map_err(|e| {
         error!("Failed to read image file {file_name:?}: {e:?}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -89,7 +89,7 @@ pub async fn favourites() -> Result<impl IntoResponse, StatusCode> {
         wallpaper.image_file.file_name
     };
 
-    let image_path = Path::new(WALLPAPERS_DIR).join(&file_name);
+    let image_path = WALLPAPERS_DIR.join(&file_name);
     let data = fs::read(&image_path).await.map_err(|e| {
         error!("Failed to read image file {file_name:?}: {e:?}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -141,7 +141,7 @@ pub async fn smartget() -> Result<impl IntoResponse, StatusCode> {
         wallpaper.image_file.file_name
     };
 
-    let image_path = Path::new(WALLPAPERS_DIR).join(&file_name);
+    let image_path = WALLPAPERS_DIR.join(&file_name);
     let data = fs::read(&image_path).await.map_err(|e| {
         error!("Failed to read image file {file_name:?}: {e:?}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -247,19 +247,15 @@ pub async fn generate_wallpaper_impl(
         thumbnail.into_rgba8().as_raw(),
     );
 
-    // Save to file
-    let dir = Path::new(WALLPAPERS_DIR);
-    fs::create_dir_all(dir).await?;
-
     let datetime_str = datetime.to_rfc3339();
 
     // Save the original image
     let file_name = format!("{datetime_str}.webp");
     std::fs::write(
-        dir.join(&file_name),
+        WALLPAPERS_DIR.join(&file_name),
         &*webp::Encoder::from_image(&image).unwrap().encode(90.0),
     )?;
-    // image.save_with_format(dir.join(&file_name), ImageFormat::Avif)?;
+    // image.save_with_format(WALLPAPERS_DIR.join(&file_name), ImageFormat::Avif)?;
     let image_file = ImageFile {
         file_name,
         width: image.width(),
@@ -270,7 +266,7 @@ pub async fn generate_wallpaper_impl(
     let thumb_image = image.resize_to_fill(426, 240, FilterType::Lanczos3);
     let thumb_file_name = format!("{datetime_str}_thumb.webp");
     std::fs::write(
-        dir.join(&thumb_file_name),
+        WALLPAPERS_DIR.join(&thumb_file_name),
         &*webp::Encoder::from_image(&thumb_image)
             .unwrap()
             .encode(70.0),
@@ -409,7 +405,7 @@ async fn remove_wallpaper_impl(packet: NetworkPacket<Uuid>) -> Result<()> {
         &wallpaper.image_file.file_name,
         &wallpaper.thumbnail_file.file_name,
     ] {
-        let file_path = Path::new(WALLPAPERS_DIR).join(file_name);
+        let file_path = WALLPAPERS_DIR.join(file_name);
         if file_path.exists() {
             fs::remove_file(file_path).await?;
         }

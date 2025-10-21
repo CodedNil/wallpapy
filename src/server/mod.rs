@@ -1,4 +1,5 @@
 use crate::{
+    DATABASE_FILE,
     common::{Database, DatabaseStyle, HasToken},
     server::auth::verify_token,
 };
@@ -20,8 +21,6 @@ mod gpt;
 mod image;
 pub mod routing;
 
-const DATABASE_FILE: &str = "data/database.ron";
-
 pub async fn decode_and_verify<P>(bytes: Bytes) -> Result<P, StatusCode>
 where
     P: DeserializeOwned + HasToken,
@@ -39,7 +38,7 @@ where
 }
 
 pub async fn read_database() -> Result<Database> {
-    if fs::metadata(DATABASE_FILE).await.is_err() {
+    if fs::metadata(DATABASE_FILE.clone()).await.is_err() {
         return Ok(Database {
             style: DatabaseStyle::default(),
             wallpapers: HashMap::new(),
@@ -47,7 +46,10 @@ pub async fn read_database() -> Result<Database> {
         });
     }
 
-    let mut file = OpenOptions::new().read(true).open(DATABASE_FILE).await?;
+    let mut file = OpenOptions::new()
+        .read(true)
+        .open(DATABASE_FILE.clone())
+        .await?;
     let mut data = String::new();
     file.read_to_string(&mut data).await?;
     let database: Database = ron::from_str(&data)?;
@@ -57,7 +59,7 @@ pub async fn read_database() -> Result<Database> {
 pub async fn write_database(database: &Database) -> Result<()> {
     let pretty = ron::ser::PrettyConfig::new().compact_arrays(true);
     let data = ron::ser::to_string_pretty(database, pretty)?;
-    fs::write(DATABASE_FILE, data).await?;
+    fs::write(DATABASE_FILE.clone(), data).await?;
     Ok(())
 }
 
