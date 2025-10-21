@@ -7,7 +7,8 @@ pkgs.mkShell {
     clang
     llvmPackages.bintools
     rustup
-    trunk
+    binaryen # wasm-opt
+    wasm-bindgen-cli
   ];
   LIBCLANG_PATH = pkgs.lib.makeLibraryPath [ pkgs.llvmPackages_latest.libclang.lib ];
   shellHook = ''
