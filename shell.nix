@@ -1,19 +1,14 @@
 {
   pkgs ? import <nixpkgs> { },
 }:
-let
-  overrides = builtins.fromTOML (builtins.readFile ./rust-toolchain.toml);
-in
 pkgs.mkShell {
   buildInputs = with pkgs; [
     pkg-config
     clang
-    mold
     llvmPackages.bintools
     rustup
     trunk
   ];
-  RUSTC_VERSION = overrides.toolchain.channel;
   LIBCLANG_PATH = pkgs.lib.makeLibraryPath [ pkgs.llvmPackages_latest.libclang.lib ];
   shellHook = ''
     export PATH=$PATH:''${CARGO_HOME:-~/.cargo}/bin
