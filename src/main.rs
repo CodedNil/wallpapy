@@ -1,4 +1,4 @@
-use std::{env, path::PathBuf, sync::LazyLock};
+use std::{env, sync::LazyLock};
 
 mod common;
 
@@ -10,11 +10,6 @@ mod server;
 
 static PORT: LazyLock<u16> =
     LazyLock::new(|| env::var("PORT").map_or_else(|_| 4560, |port| port.parse().unwrap_or(4560)));
-static DATA_DIR: LazyLock<PathBuf> =
-    LazyLock::new(|| env::var("DATA_DIR").map_or_else(|_| PathBuf::from("data"), PathBuf::from));
-static WALLPAPERS_DIR: LazyLock<PathBuf> = LazyLock::new(|| DATA_DIR.join("wallpapers"));
-static AUTH_FILE: LazyLock<PathBuf> = LazyLock::new(|| DATA_DIR.join("auth.ron"));
-static DATABASE_FILE: LazyLock<PathBuf> = LazyLock::new(|| DATA_DIR.join("database.ron"));
 
 #[cfg(not(target_arch = "wasm32"))]
 #[tokio::main]
@@ -28,17 +23,17 @@ async fn main() {
         .unwrap();
 
     // Make data dir if it doesn't exist
-    std::fs::create_dir_all(WALLPAPERS_DIR.clone()).unwrap();
+    std::fs::create_dir_all(server::WALLPAPERS_DIR.clone()).unwrap();
 
     // Set up router
-    println!("Current dir: {:?}", env::current_dir().unwrap());
-
     let app = server::routing::setup_routes(
         axum::Router::new()
-            .fallback_service(tower_http::services::ServeDir::new("dist"))
+            .fallback_service(tower_http::services::ServeDir::new(
+                env::var("DIST_DIR").unwrap_or_else(|_| "dist".into()),
+            ))
             .nest_service(
                 "/wallpapers",
-                tower_http::services::ServeDir::new(WALLPAPERS_DIR.clone()),
+                tower_http::services::ServeDir::new(server::WALLPAPERS_DIR.clone()),
             )
             .layer(tower_http::compression::CompressionLayer::new()),
     );

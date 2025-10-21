@@ -1,4 +1,4 @@
-use crate::{AUTH_FILE, common::LoginPacket};
+use crate::{common::LoginPacket, server::AUTH_FILE};
 use anyhow::{Result, anyhow};
 use argon2::{
     Argon2,

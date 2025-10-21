@@ -1,5 +1,4 @@
 use crate::{
-    DATABASE_FILE,
     common::{Database, DatabaseStyle, HasToken},
     server::auth::verify_token,
 };
@@ -9,11 +8,17 @@ use bincode::serde::decode_from_slice;
 use chrono::Duration;
 use log::error;
 use serde::de::DeserializeOwned;
-use std::collections::HashMap;
+use std::{collections::HashMap, env, path::PathBuf, sync::LazyLock};
 use tokio::{
     fs::{self, OpenOptions},
     io::AsyncReadExt,
 };
+
+static DATA_DIR: LazyLock<PathBuf> =
+    LazyLock::new(|| env::var("DATA_DIR").map_or_else(|_| PathBuf::from("data"), PathBuf::from));
+pub static WALLPAPERS_DIR: LazyLock<PathBuf> = LazyLock::new(|| DATA_DIR.join("wallpapers"));
+static AUTH_FILE: LazyLock<PathBuf> = LazyLock::new(|| DATA_DIR.join("auth.ron"));
+static DATABASE_FILE: LazyLock<PathBuf> = LazyLock::new(|| DATA_DIR.join("database.ron"));
 
 mod auth;
 mod commenting;
