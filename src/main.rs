@@ -31,6 +31,8 @@ async fn main() {
     std::fs::create_dir_all(WALLPAPERS_DIR.clone()).unwrap();
 
     // Set up router
+    println!("Current dir: {:?}", env::current_dir().unwrap());
+
     let app = server::routing::setup_routes(
         axum::Router::new()
             .fallback_service(tower_http::services::ServeDir::new("dist"))
