@@ -63,6 +63,11 @@ pub async fn latest() -> Result<impl IntoResponse, StatusCode> {
     if let Ok(content_type) = HeaderValue::from_str(mime_type.as_ref()) {
         headers.insert("Content-Type", content_type);
     }
+    if let Ok(content_disposition) =
+        HeaderValue::from_str(&format!("attachment; filename=\"{file_name}\""))
+    {
+        headers.insert("Content-Disposition", content_disposition);
+    }
 
     Ok((StatusCode::OK, headers, data))
 }
@@ -98,6 +103,11 @@ pub async fn favourites() -> Result<impl IntoResponse, StatusCode> {
     let mut headers = HeaderMap::new();
     if let Ok(content_type) = HeaderValue::from_str(mime_type.as_ref()) {
         headers.insert("Content-Type", content_type);
+    }
+    if let Ok(content_disposition) =
+        HeaderValue::from_str(&format!("attachment; filename=\"{file_name}\""))
+    {
+        headers.insert("Content-Disposition", content_disposition);
     }
 
     Ok((StatusCode::OK, headers, data))
@@ -150,6 +160,11 @@ pub async fn smartget() -> Result<impl IntoResponse, StatusCode> {
     let mut headers = HeaderMap::new();
     if let Ok(content_type) = HeaderValue::from_str(mime_type.as_ref()) {
         headers.insert("Content-Type", content_type);
+    }
+    if let Ok(content_disposition) =
+        HeaderValue::from_str(&format!("attachment; filename=\"{file_name}\""))
+    {
+        headers.insert("Content-Disposition", content_disposition);
     }
 
     Ok((StatusCode::OK, headers, data))
