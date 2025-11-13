@@ -6,7 +6,7 @@ use anyhow::{Result, anyhow};
 use log::error;
 use reqwest::{
     Client,
-    header::{CONTENT_TYPE, HeaderMap, HeaderValue},
+    header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue},
 };
 use schemars::{JsonSchema, SchemaGenerator, generate::SchemaSettings};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -39,13 +39,6 @@ async fn llm_parse<T>(
 where
     T: JsonSchema + DeserializeOwned,
 {
-    // Construct the URL with proper variable substitution
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
-        model = settings.model.as_str(),
-        api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY not set")
-    );
-
     // Set up request headers.
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -55,30 +48,50 @@ where
         s.inline_subschemas = true;
     }))
     .into_root_schema_for::<T>();
-    if let Some(object) = schema_object.as_object_mut() {
-        object.remove("$schema");
-    }
+    schema_object.remove("$schema");
 
     // Create the inputs
-    let mut payload = json!({
-        "contents": [{"parts": [{"text": message}]}],
-        "generationConfig": {
-            "response_mime_type": "application/json",
-            "response_schema": schema_object
+    let system_message = context
+        .into_iter()
+        .map(|msg| json!({"text": msg}))
+        .collect::<Vec<_>>();
+    let payload = json!({
+        "model": format!("google/{}", settings.model.as_str()),
+        "structured_outputs": true,
+        "messages": [
+            {
+                "role": "system",
+                "content": system_message
+            },
+            {
+                "role": "user",
+                "content": message
+            }
+        ],
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "weather",
+                "strict": true,
+                "schema": schema_object
+            }
+        },
+        "reasoning": {
+          "enabled": false
         }
     });
-    if !context.is_empty() {
-        let system_parts = context
-            .into_iter()
-            .map(|msg| json!({"text": msg}))
-            .collect::<Vec<_>>();
-        payload["system_instruction"] = json!({"parts": system_parts});
-    }
 
     // Send the request and check for errors
     let response = HTTP_CLIENT
-        .post(url)
-        .headers(headers)
+        .post("https://openrouter.ai/api/v1/chat/completions".to_string())
+        .header(CONTENT_TYPE, "application/json")
+        .header(
+            AUTHORIZATION,
+            &format!(
+                "Bearer {}",
+                env::var("OPENROUTER").expect("OPENROUTER not set")
+            ),
+        )
         .json(&payload)
         .send()
         .await?;
@@ -94,11 +107,13 @@ where
     // Parse response JSON and extract inner text.
     let response_json: Value = response.json().await?;
     let inner_text = response_json
-        .pointer("/candidates/0/content/parts/0/text")
+        .pointer("/choices/0/message/content")
         .and_then(|v| v.as_str())
         .ok_or("Unexpected response structure")?;
 
-    Ok(serde_json::from_str(inner_text)?)
+    // If serialization fails, return an error including the inner text
+    Ok(serde_json::from_str(inner_text)
+        .map_err(|e| format!("Serialization failed: {e} - Outputted text: {inner_text}"))?)
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]

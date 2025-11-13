@@ -12,11 +12,14 @@ pub async fn add(packet: Bytes) -> Result<StatusCode, StatusCode> {
 
     with_db(|db| {
         let new_id = Uuid::new_v4();
-        db.comments.insert(new_id, CommentData {
-            id: new_id,
-            datetime: Utc::now(),
-            comment: pkt.data,
-        });
+        db.comments.insert(
+            new_id,
+            CommentData {
+                id: new_id,
+                datetime: Utc::now(),
+                comment: pkt.data,
+            },
+        );
         Ok(())
     })
     .await?;

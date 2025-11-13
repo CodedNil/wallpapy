@@ -18,8 +18,8 @@ image = { version = "0.25.8", default-features = false, features = [
     "jpeg",
     "webp",
 ] }
-bitflags = "2.9.4"
-schemars = "1.0.4"
+bitflags = "2.10.0"
+schemars = "1.1.0"
 
 # GUI dependencies
 egui = { version = "0.32.3", features = ["serde"], optional = true }
