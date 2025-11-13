@@ -9,6 +9,8 @@ pkgs.mkShell {
     clippy
     lld
     gcc
+    binaryen # wasm-opt
+    wasm-bindgen-cli
   ];
   RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
 }

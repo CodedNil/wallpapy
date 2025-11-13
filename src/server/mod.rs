@@ -8,19 +8,23 @@ use bincode::serde::decode_from_slice;
 use chrono::Duration;
 use log::error;
 use serde::de::DeserializeOwned;
-use std::collections::HashMap;
+use std::{collections::HashMap, env, path::PathBuf, sync::LazyLock};
 use tokio::{
     fs::{self, OpenOptions},
     io::AsyncReadExt,
 };
+
+static DATA_DIR: LazyLock<PathBuf> =
+    LazyLock::new(|| env::var("DATA_DIR").map_or_else(|_| PathBuf::from("data"), PathBuf::from));
+pub static WALLPAPERS_DIR: LazyLock<PathBuf> = LazyLock::new(|| DATA_DIR.join("wallpapers"));
+static AUTH_FILE: LazyLock<PathBuf> = LazyLock::new(|| DATA_DIR.join("auth.ron"));
+static DATABASE_FILE: LazyLock<PathBuf> = LazyLock::new(|| DATA_DIR.join("database.ron"));
 
 mod auth;
 mod commenting;
 mod gpt;
 mod image;
 pub mod routing;
-
-const DATABASE_FILE: &str = "data/database.ron";
 
 pub async fn decode_and_verify<P>(bytes: Bytes) -> Result<P, StatusCode>
 where
@@ -39,7 +43,7 @@ where
 }
 
 pub async fn read_database() -> Result<Database> {
-    if fs::metadata(DATABASE_FILE).await.is_err() {
+    if fs::metadata(DATABASE_FILE.clone()).await.is_err() {
         return Ok(Database {
             style: DatabaseStyle::default(),
             wallpapers: HashMap::new(),
@@ -47,7 +51,10 @@ pub async fn read_database() -> Result<Database> {
         });
     }
 
-    let mut file = OpenOptions::new().read(true).open(DATABASE_FILE).await?;
+    let mut file = OpenOptions::new()
+        .read(true)
+        .open(DATABASE_FILE.clone())
+        .await?;
     let mut data = String::new();
     file.read_to_string(&mut data).await?;
     let database: Database = ron::from_str(&data)?;
@@ -57,7 +64,7 @@ pub async fn read_database() -> Result<Database> {
 pub async fn write_database(database: &Database) -> Result<()> {
     let pretty = ron::ser::PrettyConfig::new().compact_arrays(true);
     let data = ron::ser::to_string_pretty(database, pretty)?;
-    fs::write(DATABASE_FILE, data).await?;
+    fs::write(DATABASE_FILE.clone(), data).await?;
     Ok(())
 }
 

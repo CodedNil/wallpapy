@@ -1,3 +1,5 @@
+use std::{env, sync::LazyLock};
+
 mod common;
 
 #[cfg(feature = "gui")]
@@ -6,35 +8,37 @@ mod client;
 #[cfg(not(target_arch = "wasm32"))]
 mod server;
 
-pub static PORT: u16 = 4560;
-pub static WALLPAPERS_DIR: &str = "data/wallpapers";
+static PORT: LazyLock<u16> =
+    LazyLock::new(|| env::var("PORT").map_or_else(|_| 4560, |port| port.parse().unwrap_or(4560)));
 
 #[cfg(not(target_arch = "wasm32"))]
 #[tokio::main]
 async fn main() {
-    if cfg!(debug_assertions) {
-        dotenvy::dotenv().ok();
-    }
+    #[cfg(debug_assertions)]
+    dotenvy::dotenv().ok();
+
     simple_logger::SimpleLogger::new()
         .with_level(log::LevelFilter::Info)
         .init()
         .unwrap();
 
     // Make data dir if it doesn't exist
-    std::fs::create_dir_all(WALLPAPERS_DIR).unwrap();
+    std::fs::create_dir_all(server::WALLPAPERS_DIR.clone()).unwrap();
 
     // Set up router
     let app = server::routing::setup_routes(
         axum::Router::new()
-            .fallback_service(tower_http::services::ServeDir::new("dist"))
+            .fallback_service(tower_http::services::ServeDir::new(
+                env::var("DIST_DIR").unwrap_or_else(|_| "dist".into()),
+            ))
             .nest_service(
                 "/wallpapers",
-                tower_http::services::ServeDir::new(WALLPAPERS_DIR),
+                tower_http::services::ServeDir::new(server::WALLPAPERS_DIR.clone()),
             )
             .layer(tower_http::compression::CompressionLayer::new()),
     );
 
-    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], PORT));
+    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], *PORT));
     println!("Listening on {addr}");
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
 

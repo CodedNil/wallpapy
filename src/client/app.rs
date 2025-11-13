@@ -100,7 +100,7 @@ impl Wallpapy {
         cc.egui_ctx.set_fonts(fonts);
 
         Self {
-            host: format!("localhost:{PORT}"),
+            host: format!("localhost:{}", *PORT),
             toasts: Arc::new(Mutex::new(Toasts::default())),
             database: None,
             fullscreen_image: None,
@@ -913,7 +913,7 @@ impl Wallpapy {
             })
             .show(ctx, |_| {
                 Window::new("Login Form")
-                    .fixed_pos(ctx.screen_rect().center())
+                    .fixed_pos(ctx.content_rect().center())
                     .fixed_size([300.0, 0.0])
                     .pivot(Align2::CENTER_CENTER)
                     .title_bar(false)

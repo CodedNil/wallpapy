@@ -1,4 +1,4 @@
-use crate::common::LoginPacket;
+use crate::{common::LoginPacket, server::AUTH_FILE};
 use anyhow::{Result, anyhow};
 use argon2::{
     Argon2,
@@ -19,7 +19,6 @@ use uuid::Uuid;
 
 const MIN_PASSWORD_LENGTH: usize = 6;
 const TOKEN_LENGTH: usize = 20;
-const AUTH_FILE: &str = "data/auth.ron";
 
 #[derive(Serialize, Deserialize)]
 struct Account {
@@ -59,11 +58,14 @@ pub async fn login_server(packet: Bytes) -> impl IntoResponse {
 }
 
 async fn read_accounts() -> Result<Accounts> {
-    if fs::metadata(AUTH_FILE).await.is_err() {
+    if fs::metadata(AUTH_FILE.clone()).await.is_err() {
         return Ok(HashMap::new());
     }
 
-    let mut file = OpenOptions::new().read(true).open(AUTH_FILE).await?;
+    let mut file = OpenOptions::new()
+        .read(true)
+        .open(AUTH_FILE.clone())
+        .await?;
     let mut data = String::new();
     file.read_to_string(&mut data).await?;
     let accounts: Accounts = ron::from_str(&data)?;
@@ -73,7 +75,7 @@ async fn read_accounts() -> Result<Accounts> {
 async fn write_accounts(accounts: &Accounts) -> Result<()> {
     let pretty = ron::ser::PrettyConfig::new().compact_arrays(true);
     let data = ron::ser::to_string_pretty(accounts, pretty)?;
-    fs::write(AUTH_FILE, data).await?;
+    fs::write(AUTH_FILE.clone(), data).await?;
     Ok(())
 }
 

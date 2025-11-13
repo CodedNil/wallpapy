@@ -13,16 +13,17 @@
 
 Your personalised daily wallpaper generator
 
-![image](https://github.com/user-attachments/assets/db4a1f5e-125c-4f33-aa87-ffca5e023ef5)
+<img width="1872" height="2058" alt="image" src="https://github.com/user-attachments/assets/1189ff43-9c26-4a33-ae6d-6c155bde10e5" />
+
 
 ## Overview
 
-Wallpapy uses AI models such as OpenAI GPT-4o to generate prompts for new wallpapers in a style you choose, aiming to give a refreshing variety, and using FLUX.1 Schnell to generate the images. It provides api calls to fetch your liked images to use in OS extensions that can serve a random wallpaper to you every x hours.
+Wallpapy uses AI models such as Gemini 2.5 Flash to generate prompts for new wallpapers in a style you choose, aiming to give a refreshing variety, and using Seedream 4.0 to generate the images. It provides api calls to fetch your liked images to use in OS extensions that can serve a random wallpaper to you every x hours.
 
 ## Features
 
 - **User Guided:** You can provide feedback on the generated wallpapers to fine tune its outputs to a style you love.
-- **Cost Effective:** Very efficient usage of LLM models and Flux to cost no more than a couple pennies a day.
+- **Cost Effective:** Very efficient usage of ai models to cost no more than a couple pennies a day.
 - **Web Application:** Access Wallpapy from any device with a web browser, ensuring a consistent and responsive experience across desktops, tablets, and smartphones.
 - **Powered by `egui`:** Utilises the [`egui`](https://github.com/emilk/egui) library for a smooth and efficient graphical user interface experience.
 
@@ -31,9 +32,9 @@ Wallpapy uses AI models such as OpenAI GPT-4o to generate prompts for new wallpa
 ### Installation and Configuration
 1. **Clone the Repository**
 2. **Install the WebAssembly Target:** `rustup target add wasm32-unknown-unknown`
-3. **Install Trunk [Trunk](https://github.com/trunk-rs/trunk) for building WASM applications** `cargo install --locked trunk`
+3. **Install wasm-bindgen and wasm-opt for building WASM applications**
 4. **Install [Just](https://github.com/casey/just) for managing build commands:** `cargo install --locked just`
-5. **Create Configuration File:** Copy the `.env-template` to `.env` and fill in your OpenAI and Replicate details
+5. **Create Configuration File:** Copy the `.env-template` to `.env` and fill in your Gemini and Replicate details
 
 ### Build and Run Commands
 - **Run the App in Desktop Mode:** `just`
