@@ -25,8 +25,8 @@ enum Model {
 impl Model {
     const fn as_str(&self) -> &'static str {
         match self {
-            Self::Gemini25Flash => "gemini-2.5-flash",
-            Self::Gemini25FlashLite => "gemini-2.5-flash-lite",
+            Self::Gemini25Flash => "google/gemini-2.5-flash",
+            Self::Gemini25FlashLite => "google/gemini-2.5-flash-lite",
         }
     }
 }
@@ -51,17 +51,13 @@ where
     schema_object.remove("$schema");
 
     // Create the inputs
-    let system_message = context
-        .into_iter()
-        .map(|msg| json!({"text": msg}))
-        .collect::<Vec<_>>();
     let payload = json!({
-        "model": format!("google/{}", settings.model.as_str()),
+        "model": settings.model.as_str(),
         "structured_outputs": true,
         "messages": [
             {
                 "role": "system",
-                "content": system_message
+                "content": context.join("\n\n")
             },
             {
                 "role": "user",
@@ -71,7 +67,7 @@ where
         "response_format": {
             "type": "json_schema",
             "json_schema": {
-                "name": "weather",
+                "name": "schema",
                 "strict": true,
                 "schema": schema_object
             }
