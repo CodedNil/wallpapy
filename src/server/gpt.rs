@@ -15,25 +15,8 @@ use std::{collections::HashMap, env, error::Error, sync::LazyLock};
 
 static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
 
-struct LLMSettings {
-    model: Model,
-}
-enum Model {
-    Gemini25Flash,
-    Gemini25FlashLite,
-}
-impl Model {
-    const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Gemini25Flash => "google/gemini-2.5-flash",
-            Self::Gemini25FlashLite => "google/gemini-2.5-flash-lite",
-        }
-    }
-}
-
 async fn llm_parse<T>(
     context: Vec<String>,
-    settings: LLMSettings,
     message: String,
 ) -> Result<T, Box<dyn Error + Send + Sync>>
 where
@@ -52,7 +35,7 @@ where
 
     // Create the inputs
     let payload = json!({
-        "model": settings.model.as_str(),
+        "model": "x-ai/grok-4.1-fast",
         "structured_outputs": true,
         "messages": [
             {
@@ -201,15 +184,7 @@ pub async fn generate_prompt() -> Result<(String, DatabaseStyle)> {
         })
         .collect::<Vec<_>>()
         .join("\n");
-        match llm_parse::<DiscardedSummary>(
-            vec![],
-            LLMSettings {
-                model: Model::Gemini25FlashLite,
-            },
-            summary_text,
-        )
-        .await
-        {
+        match llm_parse::<DiscardedSummary>(vec![], summary_text).await {
             Ok(output) => {
                 let summary_parts = [
                     &("user LOVED", output.loved),
@@ -259,9 +234,6 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
     ];
     llm_parse::<PromptData>(
         context,
-        LLMSettings {
-            model: Model::Gemini25Flash,
-        },
         format!("Create me a new image prompt, {user_message}\nPrompt:"),
     )
     .await
