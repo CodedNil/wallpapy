@@ -9,7 +9,7 @@ use reqwest::{
     header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue},
 };
 use schemars::{JsonSchema, SchemaGenerator, generate::SchemaSettings};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use std::{collections::HashMap, env, error::Error, sync::LazyLock};
 
@@ -95,20 +95,6 @@ where
         .map_err(|e| format!("Serialization failed: {e} - Outputted text: {inner_text}"))?)
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
-struct DiscardedSummary {
-    /// Summary of the users loved descriptions, do not include common things like seasons, time of
-    /// day etc. do not repeat similar items and err on the side of fewer items, ideally 2-4 word
-    /// per item, max 7 words per item if needed
-    loved: Vec<String>,
-    /// Summary of the users liked descriptions, same rules as for loved
-    liked: Vec<String>,
-    /// Summary of the users disliked descriptions, same rules as for loved
-    disliked: Vec<String>,
-    /// Summary of all other descriptions, same rules as for loved
-    others: Vec<String>,
-}
-
 pub async fn generate_prompt() -> Result<(String, DatabaseStyle)> {
     let database = read_database().await.unwrap_or_else(|e| {
         error!("Failed accessing database {e:?}");
@@ -133,16 +119,10 @@ pub async fn generate_prompt() -> Result<(String, DatabaseStyle)> {
         .collect::<Vec<_>>();
     database_history.sort_by_key(|(datetime, ..)| *datetime);
 
-    let mut history_string = Vec::new();
-    let mut discarded: HashMap<LikedState, Vec<String>> = HashMap::new();
-
+    let mut history_string = Vec::with_capacity(database_history.len().min(100));
     for (i, (_, wallpaper, comment)) in database_history.iter().rev().enumerate() {
-        if let Some(wallpaper) = wallpaper {
-            if i < match wallpaper.liked_state {
-                LikedState::Loved => 100,
-                LikedState::Liked | LikedState::Disliked => 60,
-                LikedState::Neutral => 40,
-            } {
+        if i < 100 {
+            if let Some(wallpaper) = wallpaper {
                 history_string.push(format!(
                     "'{}'{}",
                     wallpaper.prompt_data.prompt,
@@ -153,65 +133,11 @@ pub async fn generate_prompt() -> Result<(String, DatabaseStyle)> {
                         LikedState::Neutral => "",
                     },
                 ));
-            } else if i < 200 {
-                discarded
-                    .entry(wallpaper.liked_state)
-                    .or_default()
-                    .push(wallpaper.prompt_data.prompt.clone());
-            }
-        }
-        if let Some(comment) = comment {
-            history_string.push(format!("User commented: '{}'", comment.comment));
-        }
-    }
-
-    // Use LLM to summarize the discarded string into the key elements
-    if discarded.values().any(|v| !v.is_empty()) {
-        let summary_text = [
-            (LikedState::Loved, "Loved items"),
-            (LikedState::Liked, "Liked items"),
-            (LikedState::Disliked, "Disliked items"),
-            (LikedState::Neutral, "Other items"),
-        ]
-        .iter()
-        .filter_map(|(state, label)| {
-            discarded
-                .get(state)
-                .filter(|items| !items.is_empty())
-                .map(|items| format!("{}: {}", label, items.join(", ")))
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-        match llm_parse::<DiscardedSummary>(vec![], summary_text).await {
-            Ok(output) => {
-                let summary_parts = [
-                    &("user LOVED", output.loved),
-                    &("user liked", output.liked),
-                    &("user disliked", output.disliked),
-                    &("others", output.others),
-                ]
-                .iter()
-                .filter_map(|(text, list)| {
-                    if list.is_empty() {
-                        None
-                    } else {
-                        Some(format!("({}: {})", text, list.join(", ")))
-                    }
-                })
-                .collect::<Vec<_>>();
-                if !summary_parts.is_empty() {
-                    history_string.push(format!(
-                        "Summary of older history: {}",
-                        summary_parts.join(" ")
-                    ));
-                }
-            }
-            Err(e) => {
-                error!("Failed to parse discarded summary: {e:?}");
+            } else if let Some(comment) = comment {
+                history_string.push(format!("User commented: '{}'", comment.comment));
             }
         }
     }
-
     Ok((history_string.join("\n"), database.style))
 }
 
