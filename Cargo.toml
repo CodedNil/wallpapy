@@ -1,6 +1,6 @@
 [package]
 name = "wallpapy"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2024"
 
 [dependencies]
@@ -62,7 +62,7 @@ axum = { version = "0.8.7", default-features = false, features = [
     "http1",
     "tokio",
 ] }
-tower-http = { version = "0.6.6", features = [
+tower-http = { version = "0.6.7", features = [
     "fs",
     "async-compression",
     "compression-deflate",

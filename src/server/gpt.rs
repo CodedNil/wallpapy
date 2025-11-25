@@ -139,30 +139,28 @@ pub async fn generate_prompt() -> Result<(String, DatabaseStyle)> {
     for (i, (_, wallpaper, comment)) in database_history.iter().rev().enumerate() {
         if let Some(wallpaper) = wallpaper {
             if i < match wallpaper.liked_state {
-                LikedState::Loved => 60,
-                LikedState::Liked | LikedState::Disliked => 30,
-                LikedState::Neutral => 20,
+                LikedState::Loved => 100,
+                LikedState::Liked | LikedState::Disliked => 60,
+                LikedState::Neutral => 40,
             } {
                 history_string.push(format!(
-                    "{}'{}'",
+                    "'{}'{}",
+                    wallpaper.prompt_data.prompt,
                     match wallpaper.liked_state {
-                        LikedState::Loved => "(user LOVED this) ",
-                        LikedState::Liked => "(user liked this) ",
-                        LikedState::Disliked => "(user disliked this) ",
+                        LikedState::Loved => " (user LOVED this)",
+                        LikedState::Liked => " (user liked this)",
+                        LikedState::Disliked => " (user disliked this)",
                         LikedState::Neutral => "",
                     },
-                    wallpaper.prompt_data.shortened_prompt
                 ));
-            } else if i < 100 {
+            } else if i < 200 {
                 discarded
                     .entry(wallpaper.liked_state)
                     .or_default()
-                    .push(wallpaper.prompt_data.shortened_prompt.clone());
+                    .push(wallpaper.prompt_data.prompt.clone());
             }
         }
-        if let Some(comment) = comment
-            && i < 30
-        {
+        if let Some(comment) = comment {
             history_string.push(format!("User commented: '{}'", comment.comment));
         }
     }
@@ -223,13 +221,13 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
     let (history_string, style) = generate_prompt().await?;
     let context = vec![
         format!(
-            "Prioritise users comments as feedback, aim for variety above all else, every image should be totally refreshing with little in common with the previous few.\nThink about this history before responding to avoid repeating previous prompts\nHistory of previous prompts and comments, most recent first (AVOID anything similar to this list):\n{history_string}"
-        ),
-        format!(
-            "You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines\nTypes of content to include (not exhaustive just take inspiration) '{}'\nThe overall style direction is '{}' (include the guiding style in every prompt, not exact wording but the meaning)\nNever include anything '{}'",
+            "You are a wallpaper image prompt generator, write a prompt for an wallpaper image in a few sentences without new lines\nPrioritise users comments as feedback, aim for variety above all else, every image should be totally refreshing with little in common with the previous few\nTypes of content to include (not exhaustive just take inspiration) '{}'\nThe overall style direction is '{}' (include the guiding style in every prompt, not exact wording but the meaning)\nNever include anything '{}'",
             style.contents.replace('\n', " "),
             style.style.replace('\n', " "),
             style.negative_contents.replace('\n', " ")
+        ),
+        format!(
+            "Think about this history before responding to avoid repeating previous prompts - history of previous prompts and comments, most recent first (AVOID anything similar to this list):\n{history_string}"
         ),
     ];
     llm_parse::<PromptData>(
