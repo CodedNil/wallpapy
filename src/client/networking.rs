@@ -2,8 +2,8 @@ use crate::common::{
     Database, LikeBody, LikedState, LoginPacket, NetworkPacket, StyleBody, StyleVariant,
 };
 use anyhow::{Result, anyhow};
-use bincode::serde::{decode_from_slice, encode_to_vec};
 use ehttp::{Request, Response, fetch};
+use postcard::{from_bytes, to_allocvec};
 use uuid::Uuid;
 
 /// A single “send a request” helper.
@@ -22,8 +22,7 @@ fn send<T, R>(
     let req = payload.map_or_else(
         || Request::get(&url),
         |body| {
-            let bytes =
-                encode_to_vec(&body, bincode::config::standard()).expect("serialize must not fail");
+            let bytes = to_allocvec(&body).expect("serialize must not fail");
             Request::post(&url, bytes)
         },
     );
@@ -185,9 +184,7 @@ pub fn get_database(host: &str, on_done: impl 'static + Send + FnOnce(Result<Dat
         "get",
         None,
         |resp| {
-            decode_from_slice::<Database, _>(&resp.bytes, bincode::config::standard())
-                .map(|(db, _)| db)
-                .map_err(|_| anyhow!("Failed to decode database"))
+            from_bytes::<Database>(&resp.bytes).map_err(|_| anyhow!("Failed to decode database"))
         },
         on_done,
     );

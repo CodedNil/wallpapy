@@ -5,9 +5,9 @@ use argon2::{
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
 use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
-use bincode::{config::Configuration, serde::decode_from_slice};
 use chrono::{DateTime, Utc};
 use log::error;
+use postcard::from_bytes;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -38,15 +38,13 @@ struct Token {
 type Accounts = HashMap<Uuid, Account>;
 
 pub async fn login_server(packet: Bytes) -> impl IntoResponse {
-    let (packet, _) =
-        match decode_from_slice::<LoginPacket, Configuration>(&packet, bincode::config::standard())
-        {
-            Ok(value) => value,
-            Err(e) => {
-                error!("Failed to deserialise login packet: {e:?}");
-                return (StatusCode::BAD_REQUEST, String::new());
-            }
-        };
+    let packet = match from_bytes::<LoginPacket>(&packet) {
+        Ok(value) => value,
+        Err(e) => {
+            error!("Failed to deserialise login packet: {e:?}");
+            return (StatusCode::BAD_REQUEST, String::new());
+        }
+    };
 
     match login_impl(&packet).await {
         Ok(token) => (StatusCode::OK, token),

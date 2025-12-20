@@ -5,9 +5,9 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use bincode::serde::encode_to_vec;
 use chrono::{Duration, Utc};
 use log::{error, info};
+use postcard::to_allocvec;
 
 const NEW_WALLPAPER_INTERVAL: Duration = Duration::hours(6);
 
@@ -36,7 +36,7 @@ pub async fn get_database() -> impl IntoResponse {
         }
     };
 
-    match encode_to_vec(&database, bincode::config::standard()) {
+    match to_allocvec(&database) {
         Ok(data) => (StatusCode::OK, data).into_response(),
         Err(e) => {
             error!("{e:?}");

@@ -35,7 +35,7 @@ where
 
     // Create the inputs
     let payload = json!({
-        "model": "x-ai/grok-4.1-fast",
+        "model": "deepseek/deepseek-v3.2",
         "structured_outputs": true,
         "messages": [
             {

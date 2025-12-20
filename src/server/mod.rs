@@ -4,9 +4,9 @@ use crate::{
 };
 use anyhow::Result;
 use axum::{body::Bytes, http::StatusCode};
-use bincode::serde::decode_from_slice;
 use chrono::Duration;
 use log::error;
+use postcard::from_bytes;
 use serde::de::DeserializeOwned;
 use std::{collections::HashMap, env, path::PathBuf, sync::LazyLock};
 use tokio::{
@@ -30,11 +30,10 @@ pub async fn decode_and_verify<P>(bytes: Bytes) -> Result<P, StatusCode>
 where
     P: DeserializeOwned + HasToken,
 {
-    let (pkt, _): (P, usize) =
-        decode_from_slice(&bytes, bincode::config::standard()).map_err(|e| {
-            error!("failed to deserialize packet: {e:?}");
-            StatusCode::BAD_REQUEST
-        })?;
+    let pkt = from_bytes::<P>(&bytes).map_err(|e| {
+        error!("failed to deserialize packet: {e:?}");
+        StatusCode::BAD_REQUEST
+    })?;
 
     if !verify_token(pkt.token()).await.unwrap_or(false) {
         return Err(StatusCode::UNAUTHORIZED);
