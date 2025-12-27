@@ -35,7 +35,7 @@ where
 
     // Create the inputs
     let payload = json!({
-        "model": "deepseek/deepseek-v3.2",
+        "model": env::var("OPENROUTER_MODEL").unwrap_or_else(|_| "openai/gpt-oss-120b".to_string()),
         "structured_outputs": true,
         "messages": [
             {
@@ -55,9 +55,6 @@ where
                 "schema": schema_object
             }
         },
-        "reasoning": {
-          "enabled": false
-        }
     });
 
     // Send the request and check for errors
