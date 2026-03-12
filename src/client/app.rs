@@ -393,7 +393,9 @@ impl Wallpapy {
                             ui.input(|i| i.key_pressed(Key::ArrowLeft) || i.key_pressed(Key::A));
                         let right_pressed =
                             ui.input(|i| i.key_pressed(Key::ArrowRight) || i.key_pressed(Key::D));
-                        if (left_pressed || right_pressed) && self.database.is_some() {
+                        if (left_pressed || right_pressed)
+                            && let Some(database) = self.database.as_ref()
+                        {
                             let mut target_datetime = None;
                             let mut target_wallpaper = None;
 
@@ -403,7 +405,7 @@ impl Wallpapy {
                                 |dt1, dt2| dt1 < dt2
                             };
 
-                            for paper in self.database.as_ref().unwrap().wallpapers.values() {
+                            for paper in database.wallpapers.values() {
                                 if comparison(paper.datetime, wallpaper.datetime)
                                     && (target_datetime.is_none()
                                         || comparison(target_datetime.unwrap(), paper.datetime))

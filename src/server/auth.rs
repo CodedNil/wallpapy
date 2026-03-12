@@ -8,7 +8,7 @@ use axum::{body::Bytes, http::StatusCode, response::IntoResponse};
 use chrono::{DateTime, Utc};
 use log::error;
 use postcard::from_bytes;
-use rand::Rng;
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::{
