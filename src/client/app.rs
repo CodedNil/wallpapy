@@ -11,7 +11,7 @@ use bitflags::bitflags;
 use chrono::Local;
 use egui::{
     Align2, CentralPanel, Color32, Context, CursorIcon, FontId, Frame, Image, Key, PointerButton,
-    Rect, RichText, ScrollArea, Sense, Shape, TextEdit, Vec2, Widget, Window, vec2,
+    Rect, RichText, ScrollArea, Sense, Shape, TextEdit, Ui, Vec2, Widget, Window, vec2,
 };
 use egui_notify::Toasts;
 use egui_pull_to_refresh::PullToRefresh;
@@ -90,7 +90,7 @@ impl Wallpapy {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         egui_thumbhash::register(&cc.egui_ctx);
 
-        cc.egui_ctx.style_mut(|style| {
+        cc.egui_ctx.global_style_mut(|style| {
             style.visuals.window_shadow = egui::epaint::Shadow::NONE;
             style.spacing.item_spacing = Vec2::new(8.0, 8.0);
         });
@@ -121,39 +121,39 @@ impl eframe::App for Wallpapy {
         eframe::set_value(storage, eframe::APP_KEY, &self.stored);
     }
 
-    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         #[cfg(target_arch = "wasm32")]
         {
             let web_info = &_frame.info().web_info;
             self.host = web_info.location.host.clone();
         }
 
-        self.get_database(ctx);
+        self.get_database(ui.clone());
         if self.stored.auth_token.is_empty() {
-            self.show_login_panel(ctx);
+            self.show_login_panel(ui);
         } else {
-            self.show_main_panel(ctx);
+            self.show_main_panel(ui);
         }
 
-        self.toasts.lock().show(ctx);
+        self.toasts.lock().show(ui);
     }
 }
 
 impl Wallpapy {
-    fn show_main_panel(&mut self, ctx: &Context) {
-        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
+    fn show_main_panel(&mut self, ui: &mut Ui) {
+        egui::Panel::top("top_panel").show_inside(ui, |ui| {
             ui.horizontal(|ui| {
                 if ui.button("Generate Wallpaper").clicked() {
                     let toasts_store = self.toasts.clone();
                     let network_store = self.network_data.clone();
                     toasts_store.lock().info("Generating Wallpaper");
-                    let ctx = ctx.clone();
+                    let ui = ui.clone();
                     generate_wallpaper(
                         &self.host,
                         &self.stored.auth_token,
                         self.comment_submission.trim(),
                         move |result| {
-                            ctx.request_repaint();
+                            ui.request_repaint();
                             button_pressed_result(
                                 result,
                                 &network_store,
@@ -170,13 +170,13 @@ impl Wallpapy {
                 if ui.button("Submit Comment").clicked() {
                     let toasts_store = self.toasts.clone();
                     let network_store = self.network_data.clone();
-                    let ctx = ctx.clone();
+                    let ui = ui.clone();
                     add_comment(
                         &self.host,
                         &self.stored.auth_token,
                         self.comment_submission.trim(),
                         move |result| {
-                            ctx.request_repaint();
+                            ui.request_repaint();
                             button_pressed_result(result, &network_store, &toasts_store, "");
                         },
                     );
@@ -304,7 +304,7 @@ impl Wallpapy {
             }
         });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             let mut new_fullscreen = None;
             // If escape pressed, close the fullscreen image
             if ui.input(|i| i.key_pressed(Key::Escape)) {
@@ -876,7 +876,7 @@ impl Wallpapy {
         }
     }
 
-    fn get_database(&mut self, ctx: &Context) {
+    fn get_database(&mut self, ctx: Context) {
         let network_store = self.network_data.clone();
         let mut network_data_guard = network_store.lock();
         match &network_data_guard.get_database {
@@ -885,7 +885,6 @@ impl Wallpapy {
                 network_data_guard.get_database = GetDatabaseState::InProgress;
                 drop(network_data_guard);
 
-                let ctx = ctx.clone();
                 get_database(&self.host, move |res| {
                     network_store.lock().get_database = GetDatabaseState::Done(res);
                     ctx.request_repaint();
@@ -907,20 +906,20 @@ impl Wallpapy {
         }
     }
 
-    fn show_login_panel(&mut self, ctx: &Context) {
+    fn show_login_panel(&mut self, ui: &mut Ui) {
         CentralPanel::default()
             .frame(Frame {
                 fill: Color32::from_rgb(25, 25, 35),
                 ..Default::default()
             })
-            .show(ctx, |_| {
+            .show_inside(ui, |ui| {
                 Window::new("Login Form")
-                    .fixed_pos(ctx.content_rect().center())
+                    .fixed_pos(ui.content_rect().center())
                     .fixed_size([300.0, 0.0])
                     .pivot(Align2::CENTER_CENTER)
                     .title_bar(false)
                     .resizable(false)
-                    .show(ctx, |ui| {
+                    .show(ui, |ui| {
                         ui.vertical_centered(|ui| {
                             self.draw_login_form(ui);
                         });
