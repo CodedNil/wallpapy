@@ -60,7 +60,7 @@ pub async fn query_prompt(packet: Bytes) -> Result<(StatusCode, String), StatusC
     let _: NetworkPacket<()> = decode_and_verify(packet).await?;
 
     // Query GPT for the prompt it would send to create an image
-    let (body, _) = gpt::generate_prompt().await.map_err(|e| {
+    let (body, _, _) = gpt::generate_prompt().await.map_err(|e| {
         error!("gpt error: {e:?}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;

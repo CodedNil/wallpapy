@@ -23,7 +23,7 @@ async fn main() {
         .unwrap();
 
     // Make data dir if it doesn't exist
-    std::fs::create_dir_all(server::WALLPAPERS_DIR.clone()).unwrap();
+    std::fs::create_dir_all(&*server::WALLPAPERS_DIR).unwrap();
 
     // Set up router
     let app = server::routing::setup_routes(
@@ -33,7 +33,7 @@ async fn main() {
             ))
             .nest_service(
                 "/wallpapers",
-                tower_http::services::ServeDir::new(server::WALLPAPERS_DIR.clone()),
+                tower_http::services::ServeDir::new(&*server::WALLPAPERS_DIR),
             )
             .layer(tower_http::compression::CompressionLayer::new()),
     );
@@ -42,9 +42,7 @@ async fn main() {
     println!("Listening on {addr}");
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
 
-    tokio::spawn(async move {
-        Box::pin(server::routing::start_server()).await;
-    });
+    tokio::spawn(server::routing::start_server());
 
     #[cfg(not(feature = "gui"))]
     axum::serve(listener, app).await.unwrap();

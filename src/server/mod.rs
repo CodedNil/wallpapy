@@ -1,5 +1,5 @@
 use crate::{
-    common::{Database, DatabaseStyle, HasToken},
+    common::{Database, HasToken},
     server::auth::verify_token,
 };
 use anyhow::Result;
@@ -8,11 +8,8 @@ use chrono::Duration;
 use log::error;
 use postcard::from_bytes;
 use serde::de::DeserializeOwned;
-use std::{collections::HashMap, env, path::PathBuf, sync::LazyLock};
-use tokio::{
-    fs::{self, OpenOptions},
-    io::AsyncReadExt,
-};
+use std::{env, path::PathBuf, sync::LazyLock};
+use tokio::fs;
 
 static DATA_DIR: LazyLock<PathBuf> =
     LazyLock::new(|| env::var("DATA_DIR").map_or_else(|_| PathBuf::from("data"), PathBuf::from));
@@ -42,28 +39,17 @@ where
 }
 
 pub async fn read_database() -> Result<Database> {
-    if fs::metadata(DATABASE_FILE.clone()).await.is_err() {
-        return Ok(Database {
-            style: DatabaseStyle::default(),
-            wallpapers: HashMap::new(),
-            comments: HashMap::new(),
-        });
+    match fs::read_to_string(&*DATABASE_FILE).await {
+        Ok(data) => Ok(ron::from_str(&data)?),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Database::default()),
+        Err(e) => Err(e.into()),
     }
-
-    let mut file = OpenOptions::new()
-        .read(true)
-        .open(DATABASE_FILE.clone())
-        .await?;
-    let mut data = String::new();
-    file.read_to_string(&mut data).await?;
-    let database: Database = ron::from_str(&data)?;
-    Ok(database)
 }
 
 pub async fn write_database(database: &Database) -> Result<()> {
     let pretty = ron::ser::PrettyConfig::new().compact_arrays(true);
     let data = ron::ser::to_string_pretty(database, pretty)?;
-    fs::write(DATABASE_FILE.clone(), data).await?;
+    fs::write(&*DATABASE_FILE, data).await?;
     Ok(())
 }
 
@@ -87,23 +73,16 @@ where
 }
 
 fn format_duration(duration: Duration) -> String {
-    let minutes = duration.num_minutes();
-    let hours = duration.num_hours();
-    let days = duration.num_days();
-    let weeks = duration.num_weeks();
-
-    if weeks >= 1 {
-        return format!("{} week{}", weeks, if weeks == 1 { "" } else { "s" });
-    }
-    if days >= 1 {
-        return format!("{} day{}", days, if days == 1 { "" } else { "s" });
-    }
-    if hours >= 1 {
-        return format!("{} hour{}", hours, if hours == 1 { "" } else { "s" });
-    }
-    if minutes >= 1 {
-        return format!("{} minute{}", minutes, if minutes == 1 { "" } else { "s" });
-    }
-
-    "less than a minute".to_string()
+    let (n, unit) = if duration.num_weeks() >= 1 {
+        (duration.num_weeks(), "week")
+    } else if duration.num_days() >= 1 {
+        (duration.num_days(), "day")
+    } else if duration.num_hours() >= 1 {
+        (duration.num_hours(), "hour")
+    } else if duration.num_minutes() >= 1 {
+        (duration.num_minutes(), "minute")
+    } else {
+        return "less than a minute".to_string();
+    };
+    format!("{n} {unit}{}", if n == 1 { "" } else { "s" })
 }

@@ -16,12 +16,14 @@ use log::{error, info};
 use rand::seq::IteratorRandom;
 use reqwest::Client;
 use serde_json::json;
-use std::{env, io::Cursor, time::Duration};
+use std::{env, io::Cursor, sync::LazyLock, time::Duration};
 use thumbhash::rgba_to_thumb_hash;
 use tokio::fs;
 use uuid::Uuid;
 
 const TIMEOUT: u64 = 360;
+
+static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
 
 pub async fn generate(packet: Bytes) -> Result<StatusCode, StatusCode> {
     let pkt: NetworkPacket<String> = decode_and_verify(packet).await?;
@@ -39,37 +41,33 @@ pub async fn generate(packet: Bytes) -> Result<StatusCode, StatusCode> {
     Ok(StatusCode::OK)
 }
 
+async fn serve_file(file_name: String) -> Result<(StatusCode, HeaderMap, Vec<u8>), StatusCode> {
+    let path = WALLPAPERS_DIR.join(&file_name);
+    let data = fs::read(&path).await.map_err(|e| {
+        error!("Failed to read image file {file_name:?}: {e:?}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let mime = mime_guess::from_path(&path).first_or_octet_stream();
+    let mut headers = HeaderMap::new();
+    if let Ok(v) = HeaderValue::from_str(mime.as_ref()) {
+        headers.insert("Content-Type", v);
+    }
+    if let Ok(v) = HeaderValue::from_str(&format!("attachment; filename=\"{file_name}\"")) {
+        headers.insert("Content-Disposition", v);
+    }
+    Ok((StatusCode::OK, headers, data))
+}
+
 pub async fn latest() -> Result<impl IntoResponse, StatusCode> {
     let db = read_database().await.map_err(|e| {
         error!("db read error: {e:?}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-
-    // Find latest wallpaper by datetime
     let Some(wallpaper) = db.wallpapers.into_values().max_by_key(|w| w.datetime) else {
         error!("No wallpapers found");
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     };
-    let file_name = wallpaper.image_file.file_name;
-
-    let image_path = WALLPAPERS_DIR.join(&file_name);
-    let data = fs::read(&image_path).await.map_err(|e| {
-        error!("Failed to read image file {file_name:?}: {e:?}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    let mime_type = mime_guess::from_path(&image_path).first_or_octet_stream();
-    let mut headers = HeaderMap::new();
-    if let Ok(content_type) = HeaderValue::from_str(mime_type.as_ref()) {
-        headers.insert("Content-Type", content_type);
-    }
-    if let Ok(content_disposition) =
-        HeaderValue::from_str(&format!("attachment; filename=\"{file_name}\""))
-    {
-        headers.insert("Content-Disposition", content_disposition);
-    }
-
-    Ok((StatusCode::OK, headers, data))
+    serve_file(wallpaper.image_file.file_name).await
 }
 
 pub async fn favourites() -> Result<impl IntoResponse, StatusCode> {
@@ -77,8 +75,6 @@ pub async fn favourites() -> Result<impl IntoResponse, StatusCode> {
         error!("db read error: {e:?}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-
-    // Find random liked wallpaper
     let file_name = {
         let mut rng = rand::rng();
         let Some(wallpaper) = db
@@ -92,88 +88,44 @@ pub async fn favourites() -> Result<impl IntoResponse, StatusCode> {
         };
         wallpaper.image_file.file_name
     };
-
-    let image_path = WALLPAPERS_DIR.join(&file_name);
-    let data = fs::read(&image_path).await.map_err(|e| {
-        error!("Failed to read image file {file_name:?}: {e:?}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    let mime_type = mime_guess::from_path(&image_path).first_or_octet_stream();
-    let mut headers = HeaderMap::new();
-    if let Ok(content_type) = HeaderValue::from_str(mime_type.as_ref()) {
-        headers.insert("Content-Type", content_type);
-    }
-    if let Ok(content_disposition) =
-        HeaderValue::from_str(&format!("attachment; filename=\"{file_name}\""))
-    {
-        headers.insert("Content-Disposition", content_disposition);
-    }
-
-    Ok((StatusCode::OK, headers, data))
+    serve_file(file_name).await
 }
 
 pub async fn smartget() -> Result<impl IntoResponse, StatusCode> {
-    let now = Utc::now();
-    let hour = now.hour();
-
-    // Define acceptable brightness range based on the time of day.
-    let acceptable_brightness_range = match hour {
+    let hour = Utc::now().hour();
+    let brightness_range = match hour {
         7..=9 | 17..=21 => (0.3, 0.6),
         10..=16 => (0.5, 1.0),
         _ => (0.0, 0.55),
     };
-
     let db = read_database().await.map_err(|e| {
         error!("db read error: {e:?}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-
-    // Find random wallpaper that meets the criteria
     let file_name = {
         let mut rng = rand::rng();
         let Some(wallpaper) = db
             .wallpapers
             .into_values()
-            .filter(|wallpaper| {
-                matches!(wallpaper.liked_state, LikedState::Liked | LikedState::Loved)
-                    && wallpaper.color_data.top_20_percent_brightness
-                        >= acceptable_brightness_range.0
-                    && wallpaper.color_data.top_20_percent_brightness
-                        <= acceptable_brightness_range.1
+            .filter(|w| {
+                matches!(w.liked_state, LikedState::Liked | LikedState::Loved)
+                    && w.color_data.top_20_percent_brightness >= brightness_range.0
+                    && w.color_data.top_20_percent_brightness <= brightness_range.1
             })
             .choose(&mut rng)
         else {
-            error!("No liked wallpapers found");
+            error!("No suitable wallpapers found");
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         };
         wallpaper.image_file.file_name
     };
-
-    let image_path = WALLPAPERS_DIR.join(&file_name);
-    let data = fs::read(&image_path).await.map_err(|e| {
-        error!("Failed to read image file {file_name:?}: {e:?}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    let mime_type = mime_guess::from_path(&image_path).first_or_octet_stream();
-    let mut headers = HeaderMap::new();
-    if let Ok(content_type) = HeaderValue::from_str(mime_type.as_ref()) {
-        headers.insert("Content-Type", content_type);
-    }
-    if let Ok(content_disposition) =
-        HeaderValue::from_str(&format!("attachment; filename=\"{file_name}\""))
-    {
-        headers.insert("Content-Disposition", content_disposition);
-    }
-
-    Ok((StatusCode::OK, headers, data))
+    serve_file(file_name).await
 }
 
 pub async fn remove(packet: Bytes) -> Result<StatusCode, StatusCode> {
     let pkt: NetworkPacket<Uuid> = decode_and_verify(packet).await?;
 
-    if let Err(e) = remove_wallpaper_impl(pkt).await {
+    if let Err(e) = remove_wallpaper_impl(pkt.data).await {
         error!("Failed to remove wallpaper: {e:?}");
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
@@ -236,7 +188,7 @@ pub async fn generate_wallpaper_impl(
 
     let id = Uuid::new_v4();
     let datetime = Utc::now();
-    let client = Client::new();
+    let client = &*HTTP_CLIENT;
     let api_token =
         env::var("REPLICATE_API_TOKEN").expect("REPLICATE_API_TOKEN environment variable not set");
 
@@ -250,7 +202,7 @@ pub async fn generate_wallpaper_impl(
     };
 
     // Generate image
-    let (image_url, image) = image_diffusion(&client, &api_token, &prompt_data.prompt).await?;
+    let (image_url, image) = image_diffusion(client, &api_token, &prompt_data.prompt).await?;
     info!("Generated image: {}", &image_url);
 
     // Resize the image to thumbnail
@@ -263,29 +215,25 @@ pub async fn generate_wallpaper_impl(
 
     let datetime_str = datetime.to_rfc3339();
 
-    // Save the original image
     let file_name = format!("{datetime_str}.webp");
-    std::fs::write(
-        WALLPAPERS_DIR.join(&file_name),
-        &*webp::Encoder::from_image(&image).unwrap().encode(90.0),
-    )?;
-    // image.save_with_format(WALLPAPERS_DIR.join(&file_name), ImageFormat::Avif)?;
+    let image_bytes: Vec<u8> = webp::Encoder::from_image(&image)
+        .unwrap()
+        .encode(90.0)
+        .to_vec();
+    fs::write(WALLPAPERS_DIR.join(&file_name), image_bytes).await?;
     let image_file = ImageFile {
         file_name,
         width: image.width(),
         height: image.height(),
     };
 
-    // Downscale to thumbnail and save as thumbnail file
     let thumb_image = image.resize_to_fill(426, 240, FilterType::Lanczos3);
     let thumb_file_name = format!("{datetime_str}_thumb.webp");
-    std::fs::write(
-        WALLPAPERS_DIR.join(&thumb_file_name),
-        &*webp::Encoder::from_image(&thumb_image)
-            .unwrap()
-            .encode(70.0),
-    )?;
-    // thumb_image.save_with_format(dir.join(&thumb_file_name), ImageFormat::Avif)?;
+    let thumb_bytes: Vec<u8> = webp::Encoder::from_image(&thumb_image)
+        .unwrap()
+        .encode(70.0)
+        .to_vec();
+    fs::write(WALLPAPERS_DIR.join(&thumb_file_name), thumb_bytes).await?;
     let thumbnail_file = ImageFile {
         file_name: thumb_file_name,
         width: thumb_image.width(),
@@ -362,7 +310,7 @@ fn calculate_color_data(img: &DynamicImage) -> ColorData {
     let contrast_ratio = (top_20_percent_brightness + 0.05) / (bottom_20_percent_brightness + 0.05);
 
     ColorData {
-        average_color: (avg_r, avg_b, avg_g),
+        average_color: (avg_r, avg_g, avg_b),
         hue,
         saturation,
         lightness,
@@ -406,12 +354,12 @@ fn calculate_chroma_hsl(lightness: f32, saturation: f32) -> f32 {
     (1.0 - 2.0f32.mul_add(lightness, -1.0).abs()) * saturation
 }
 
-async fn remove_wallpaper_impl(packet: NetworkPacket<Uuid>) -> Result<()> {
+async fn remove_wallpaper_impl(id: Uuid) -> Result<()> {
     let mut database = read_database().await?;
 
     let wallpaper = database
         .wallpapers
-        .remove(&packet.data)
+        .remove(&id)
         .ok_or_else(|| anyhow!("No entry found for UUID"))?;
 
     // Remove all associated files
@@ -467,14 +415,9 @@ async fn image_diffusion(
 async fn replicate_request_prediction(
     client: &Client,
     api_token: &str,
-    model: &str,
+    url: &str,
     input_json: &serde_json::Value,
 ) -> Result<String> {
-    let url = if model.is_empty() {
-        "https://api.replicate.com/v1/predictions"
-    } else {
-        model
-    };
     let auth_header = format!("Bearer {api_token}");
     let response = client
         .post(url)
@@ -492,7 +435,7 @@ async fn replicate_request_prediction(
 
     for _ in 0..TIMEOUT {
         let status_response = client
-            .get(status_url.clone())
+            .get(&status_url)
             .header("Authorization", &auth_header)
             .header("Content-Type", "application/json")
             .send()

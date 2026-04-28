@@ -11,10 +11,7 @@ use postcard::from_bytes;
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tokio::{
-    fs::{self, OpenOptions},
-    io::AsyncReadExt,
-};
+use tokio::fs;
 use uuid::Uuid;
 
 const MIN_PASSWORD_LENGTH: usize = 6;
@@ -56,25 +53,25 @@ pub async fn login_server(packet: Bytes) -> impl IntoResponse {
 }
 
 async fn read_accounts() -> Result<Accounts> {
-    if fs::metadata(AUTH_FILE.clone()).await.is_err() {
-        return Ok(HashMap::new());
+    match fs::read_to_string(&*AUTH_FILE).await {
+        Ok(data) => Ok(ron::from_str(&data)?),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+        Err(e) => Err(e.into()),
     }
-
-    let mut file = OpenOptions::new()
-        .read(true)
-        .open(AUTH_FILE.clone())
-        .await?;
-    let mut data = String::new();
-    file.read_to_string(&mut data).await?;
-    let accounts: Accounts = ron::from_str(&data)?;
-    Ok(accounts)
 }
 
 async fn write_accounts(accounts: &Accounts) -> Result<()> {
     let pretty = ron::ser::PrettyConfig::new().compact_arrays(true);
     let data = ron::ser::to_string_pretty(accounts, pretty)?;
-    fs::write(AUTH_FILE.clone(), data).await?;
+    fs::write(&*AUTH_FILE, data).await?;
     Ok(())
+}
+
+fn hash_password(password: &str) -> Result<String> {
+    Argon2::default()
+        .hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
+        .map(|h| h.to_string())
+        .map_err(|_| anyhow!("Failed to hash password"))
 }
 
 /// Login to account, returning a token
@@ -91,16 +88,7 @@ async fn login_impl(packet: &LoginPacket) -> Result<String> {
             ));
         }
 
-        // Hash the password
-        let password_hash = Argon2::default()
-            .hash_password(
-                packet.password.as_bytes(),
-                &SaltString::generate(&mut OsRng),
-            )
-            .map_err(|_| anyhow!("Failed to hash password"))?
-            .to_string();
-
-        // Create a new admin account
+        let password_hash = hash_password(&packet.password)?;
         let (token_entry, token) = generate_token();
         let new_account = Account {
             admin: true,
@@ -109,8 +97,6 @@ async fn login_impl(packet: &LoginPacket) -> Result<String> {
             password_hash,
             tokens: vec![token_entry],
         };
-
-        // Serialize and save the admin account to the database
         accounts.insert(new_account.uuid, new_account);
         write_accounts(&accounts).await?;
 
@@ -131,14 +117,7 @@ async fn login_impl(packet: &LoginPacket) -> Result<String> {
             ));
         }
 
-        let password_hash = Argon2::default()
-            .hash_password(
-                packet.password.as_bytes(),
-                &SaltString::generate(&mut OsRng),
-            )
-            .map_err(|_| anyhow!("Failed to hash password"))?
-            .to_string();
-
+        let password_hash = hash_password(&packet.password)?;
         let (token_entry, token) = generate_token();
         account.tokens.push(token_entry);
         account.password_hash = password_hash;

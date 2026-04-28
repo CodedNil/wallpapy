@@ -534,208 +534,154 @@ impl Wallpapy {
         ));
         painter.galley(datetime_rect.min, datetime_galley, Color32::WHITE);
 
-        // Add delete button in top-right corner
-        let delete_button_size = vec2(ui_scale.mul_add(2.0, 2.0), ui_scale.mul_add(2.0, 2.0));
-        let delete_button_rect = egui::Align2::RIGHT_TOP.anchor_size(
-            image_rect.right_top() + vec2(-20.0, 20.0),
-            delete_button_size,
-        );
-        let is_hovering = ui.rect_contains_pointer(delete_button_rect);
-        painter.add(Shape::rect_filled(
-            delete_button_rect,
-            ui_scale,
-            Color32::BLACK.gamma_multiply(if is_hovering { 1.0 } else { 0.8 }),
-        ));
-        painter.text(
-            delete_button_rect.center(),
-            egui::Align2::CENTER_CENTER,
+        let btn_size = vec2(ui_scale.mul_add(2.0, 2.0), ui_scale.mul_add(2.0, 2.0));
+
+        let delete_rect =
+            Align2::RIGHT_TOP.anchor_size(image_rect.right_top() + vec2(-20.0, 20.0), btn_size);
+        let (h, clicked) = draw_icon_button(
+            ui,
+            painter,
+            delete_rect,
             egui_phosphor::regular::X,
-            FontId::proportional(ui_scale),
-            Color32::WHITE,
+            Color32::BLACK,
+            ui_scale,
         );
-        if is_hovering {
-            sub_button_hovered = true;
-            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
-            if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
-                let toasts_store = self.toasts.clone();
-                let network_store = self.network_data.clone();
-                let ctx = ui.ctx().clone();
-                remove_image(
-                    &self.host,
-                    &self.stored.auth_token,
-                    &wallpaper.id,
-                    move |result| {
-                        ctx.request_repaint();
-                        button_pressed_result(result, &network_store, &toasts_store, "");
-                    },
-                );
-            }
+        sub_button_hovered |= h;
+        if clicked {
+            let toasts_store = self.toasts.clone();
+            let network_store = self.network_data.clone();
+            let ctx = ui.ctx().clone();
+            remove_image(
+                &self.host,
+                &self.stored.auth_token,
+                &wallpaper.id,
+                move |result| {
+                    ctx.request_repaint();
+                    button_pressed_result(result, &network_store, &toasts_store, "");
+                },
+            );
         }
 
-        // Add thumbs down button
-        let thumbs_down_button_rect = egui::Align2::RIGHT_TOP.anchor_size(
-            delete_button_rect.left_top() + vec2(-10.0, 0.0),
-            delete_button_size,
-        );
-        let is_hovering = ui.rect_contains_pointer(thumbs_down_button_rect);
-        painter.add(Shape::rect_filled(
-            thumbs_down_button_rect,
-            ui_scale,
-            if wallpaper.liked_state == LikedState::Disliked {
-                Color32::DARK_RED
-            } else {
-                Color32::BLACK
-            }
-            .gamma_multiply(if is_hovering { 1.0 } else { 0.8 }),
-        ));
-        painter.text(
-            thumbs_down_button_rect.center(),
-            egui::Align2::CENTER_CENTER,
+        let thumbs_down_rect =
+            Align2::RIGHT_TOP.anchor_size(delete_rect.left_top() + vec2(-10.0, 0.0), btn_size);
+        let thumbs_down_color = if wallpaper.liked_state == LikedState::Disliked {
+            Color32::DARK_RED
+        } else {
+            Color32::BLACK
+        };
+        let (h, clicked) = draw_icon_button(
+            ui,
+            painter,
+            thumbs_down_rect,
             egui_phosphor::regular::THUMBS_DOWN,
-            FontId::proportional(ui_scale),
-            Color32::WHITE,
+            thumbs_down_color,
+            ui_scale,
         );
-        if is_hovering {
-            sub_button_hovered = true;
-            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
-            if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
-                let toasts_store = self.toasts.clone();
-                let network_store = self.network_data.clone();
-                let ctx = ui.ctx().clone();
-                like_image(
-                    &self.host,
-                    &self.stored.auth_token,
-                    &wallpaper.id,
-                    LikedState::Disliked,
-                    move |result| {
-                        ctx.request_repaint();
-                        button_pressed_result(result, &network_store, &toasts_store, "");
-                    },
-                );
-            }
+        sub_button_hovered |= h;
+        if clicked {
+            let toasts_store = self.toasts.clone();
+            let network_store = self.network_data.clone();
+            let ctx = ui.ctx().clone();
+            like_image(
+                &self.host,
+                &self.stored.auth_token,
+                &wallpaper.id,
+                LikedState::Disliked,
+                move |result| {
+                    ctx.request_repaint();
+                    button_pressed_result(result, &network_store, &toasts_store, "");
+                },
+            );
         }
 
-        // Add thumbs up button
-        let thumbs_up_button_rect = egui::Align2::RIGHT_TOP.anchor_size(
-            thumbs_down_button_rect.left_top() + vec2(-10.0, 0.0),
-            delete_button_size,
-        );
-        let is_hovering = ui.rect_contains_pointer(thumbs_up_button_rect);
-        painter.add(Shape::rect_filled(
-            thumbs_up_button_rect,
-            ui_scale,
-            if wallpaper.liked_state == LikedState::Liked {
-                Color32::DARK_GREEN
-            } else {
-                Color32::BLACK
-            }
-            .gamma_multiply(if is_hovering { 1.0 } else { 0.8 }),
-        ));
-        painter.text(
-            thumbs_up_button_rect.center(),
-            egui::Align2::CENTER_CENTER,
+        let thumbs_up_rect =
+            Align2::RIGHT_TOP.anchor_size(thumbs_down_rect.left_top() + vec2(-10.0, 0.0), btn_size);
+        let thumbs_up_color = if wallpaper.liked_state == LikedState::Liked {
+            Color32::DARK_GREEN
+        } else {
+            Color32::BLACK
+        };
+        let (h, clicked) = draw_icon_button(
+            ui,
+            painter,
+            thumbs_up_rect,
             egui_phosphor::regular::THUMBS_UP,
-            FontId::proportional(ui_scale),
-            Color32::WHITE,
+            thumbs_up_color,
+            ui_scale,
         );
-        if is_hovering {
-            sub_button_hovered = true;
-            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
-            if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
-                let toasts_store = self.toasts.clone();
-                let network_store = self.network_data.clone();
-                let ctx = ui.ctx().clone();
-                like_image(
-                    &self.host,
-                    &self.stored.auth_token,
-                    &wallpaper.id,
-                    LikedState::Liked,
-                    move |result| {
-                        ctx.request_repaint();
-                        button_pressed_result(result, &network_store, &toasts_store, "");
-                    },
-                );
-            }
+        sub_button_hovered |= h;
+        if clicked {
+            let toasts_store = self.toasts.clone();
+            let network_store = self.network_data.clone();
+            let ctx = ui.ctx().clone();
+            like_image(
+                &self.host,
+                &self.stored.auth_token,
+                &wallpaper.id,
+                LikedState::Liked,
+                move |result| {
+                    ctx.request_repaint();
+                    button_pressed_result(result, &network_store, &toasts_store, "");
+                },
+            );
         }
 
-        // Add loved button
-        let loved_button_rect = egui::Align2::RIGHT_TOP.anchor_size(
-            thumbs_up_button_rect.left_top() + vec2(-10.0, 0.0),
-            delete_button_size,
-        );
-        let is_hovering = ui.rect_contains_pointer(loved_button_rect);
-        painter.add(Shape::rect_filled(
-            loved_button_rect,
-            ui_scale,
-            if wallpaper.liked_state == LikedState::Loved {
-                Color32::from_rgb(140, 90, 0)
-            } else {
-                Color32::BLACK
-            }
-            .gamma_multiply(if is_hovering { 1.0 } else { 0.8 }),
-        ));
-        painter.text(
-            loved_button_rect.center(),
-            egui::Align2::CENTER_CENTER,
+        let loved_rect =
+            Align2::RIGHT_TOP.anchor_size(thumbs_up_rect.left_top() + vec2(-10.0, 0.0), btn_size);
+        let loved_color = if wallpaper.liked_state == LikedState::Loved {
+            Color32::from_rgb(140, 90, 0)
+        } else {
+            Color32::BLACK
+        };
+        let (h, clicked) = draw_icon_button(
+            ui,
+            painter,
+            loved_rect,
             egui_phosphor::regular::HEART,
-            FontId::proportional(ui_scale),
-            Color32::WHITE,
+            loved_color,
+            ui_scale,
         );
-        if is_hovering {
-            sub_button_hovered = true;
-            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
-            if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
-                let toasts_store = self.toasts.clone();
-                let network_store = self.network_data.clone();
-                let ctx = ui.ctx().clone();
-                like_image(
-                    &self.host,
-                    &self.stored.auth_token,
-                    &wallpaper.id,
-                    LikedState::Loved,
-                    move |result| {
-                        ctx.request_repaint();
-                        button_pressed_result(result, &network_store, &toasts_store, "");
-                    },
-                );
-            }
+        sub_button_hovered |= h;
+        if clicked {
+            let toasts_store = self.toasts.clone();
+            let network_store = self.network_data.clone();
+            let ctx = ui.ctx().clone();
+            like_image(
+                &self.host,
+                &self.stored.auth_token,
+                &wallpaper.id,
+                LikedState::Loved,
+                move |result| {
+                    ctx.request_repaint();
+                    button_pressed_result(result, &network_store, &toasts_store, "");
+                },
+            );
         }
 
-        // Add recreate button
-        let recreate_button_rect = egui::Align2::RIGHT_TOP.anchor_size(
-            loved_button_rect.left_top() + vec2(-10.0, 0.0),
-            delete_button_size,
-        );
-        let is_hovering = ui.rect_contains_pointer(recreate_button_rect);
-        painter.add(Shape::rect_filled(
-            recreate_button_rect,
-            ui_scale,
-            Color32::BLACK.gamma_multiply(if is_hovering { 1.0 } else { 0.8 }),
-        ));
-        painter.text(
-            recreate_button_rect.center(),
-            egui::Align2::CENTER_CENTER,
+        let recreate_rect =
+            Align2::RIGHT_TOP.anchor_size(loved_rect.left_top() + vec2(-10.0, 0.0), btn_size);
+        let (h, clicked) = draw_icon_button(
+            ui,
+            painter,
+            recreate_rect,
             egui_phosphor::regular::REPEAT,
-            FontId::proportional(ui_scale),
-            Color32::WHITE,
+            Color32::BLACK,
+            ui_scale,
         );
-        if is_hovering {
-            sub_button_hovered = true;
-            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
-            if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
-                let toasts_store = self.toasts.clone();
-                let network_store = self.network_data.clone();
-                let ctx = ui.ctx().clone();
-                recreate_image(
-                    &self.host,
-                    &self.stored.auth_token,
-                    &wallpaper.id,
-                    move |result| {
-                        ctx.request_repaint();
-                        button_pressed_result(result, &network_store, &toasts_store, "");
-                    },
-                );
-            }
+        sub_button_hovered |= h;
+        if clicked {
+            let toasts_store = self.toasts.clone();
+            let network_store = self.network_data.clone();
+            let ctx = ui.ctx().clone();
+            recreate_image(
+                &self.host,
+                &self.stored.auth_token,
+                &wallpaper.id,
+                move |result| {
+                    ctx.request_repaint();
+                    button_pressed_result(result, &network_store, &toasts_store, "");
+                },
+            );
         }
 
         // Draw shortened prompt in bottom center, click to copy to clipboard
@@ -816,39 +762,30 @@ impl Wallpapy {
         ));
         painter.galley(datetime_rect.min, datetime_galley, Color32::WHITE);
 
-        // Add delete button in top-right corner
-        let delete_button_size = vec2(ui_scale.mul_add(2.0, 2.0), ui_scale.mul_add(2.0, 2.0));
-        let delete_button_rect = egui::Align2::RIGHT_TOP
-            .anchor_size(rect.right_top() + vec2(-20.0, 20.0), delete_button_size);
-        let is_hovering = ui.rect_contains_pointer(delete_button_rect);
-        painter.add(Shape::rect_filled(
-            delete_button_rect,
-            ui_scale,
-            Color32::BLACK.gamma_multiply(if is_hovering { 1.0 } else { 0.8 }),
-        ));
-        painter.text(
-            delete_button_rect.center(),
-            egui::Align2::CENTER_CENTER,
+        let btn_size = vec2(ui_scale.mul_add(2.0, 2.0), ui_scale.mul_add(2.0, 2.0));
+        let delete_rect =
+            Align2::RIGHT_TOP.anchor_size(rect.right_top() + vec2(-20.0, 20.0), btn_size);
+        let (_, clicked) = draw_icon_button(
+            ui,
+            &painter,
+            delete_rect,
             egui_phosphor::regular::X,
-            FontId::proportional(ui_scale),
-            Color32::WHITE,
+            Color32::BLACK,
+            ui_scale,
         );
-        if is_hovering {
-            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
-            if ui.input(|i| i.pointer.button_clicked(PointerButton::Primary)) {
-                let toasts_store = self.toasts.clone();
-                let network_store = self.network_data.clone();
-                let ctx = ui.ctx().clone();
-                remove_comment(
-                    &self.host,
-                    &self.stored.auth_token,
-                    &comment.id,
-                    move |result| {
-                        ctx.request_repaint();
-                        button_pressed_result(result, &network_store, &toasts_store, "");
-                    },
-                );
-            }
+        if clicked {
+            let toasts_store = self.toasts.clone();
+            let network_store = self.network_data.clone();
+            let ctx = ui.ctx().clone();
+            remove_comment(
+                &self.host,
+                &self.stored.auth_token,
+                &comment.id,
+                move |result| {
+                    ctx.request_repaint();
+                    button_pressed_result(result, &network_store, &toasts_store, "");
+                },
+            );
         }
 
         // Draw comments text in bottom center, click to copy to clipboard
@@ -977,6 +914,35 @@ impl Wallpapy {
             }
         }
     }
+}
+
+/// Returns `(hovered, clicked)`.
+fn draw_icon_button(
+    ui: &egui::Ui,
+    painter: &egui::Painter,
+    rect: Rect,
+    icon: &str,
+    color: Color32,
+    ui_scale: f32,
+) -> (bool, bool) {
+    let hovered = ui.rect_contains_pointer(rect);
+    painter.add(Shape::rect_filled(
+        rect,
+        ui_scale,
+        color.gamma_multiply(if hovered { 1.0 } else { 0.8 }),
+    ));
+    painter.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        icon,
+        FontId::proportional(ui_scale),
+        Color32::WHITE,
+    );
+    if hovered {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    let clicked = hovered && ui.input(|i| i.pointer.button_clicked(PointerButton::Primary));
+    (hovered, clicked)
 }
 
 fn button_pressed_result(
