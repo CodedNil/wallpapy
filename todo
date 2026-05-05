@@ -5,6 +5,11 @@ Reimplement filters in current gallery, including a filter for smartget which wo
 Notification pings tracking current generations etc
 Have dioxus config serve the static assets instead of custom implementation
 
-button pointer and hover animation
+button hover animation
 card hover animation
 style the form inputs, have the custom prompt within the generate button
+
+comment box cleaner outline when selected, full width
+
+
+switch to avif

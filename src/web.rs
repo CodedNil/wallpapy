@@ -98,20 +98,25 @@ fn GalleryPage() -> Element {
 #[component]
 fn StyleBox(initial_val: String) -> Element {
     let mut styles_action = use_action(action_styles);
+    let mut focused = use_signal(|| false);
     rsx! {
-        div { padding: "8px 12px", background: "rgba(15, 15, 25)",
+        div {
+            padding: "4px 8px",
+            background: if focused() { "rgba(255,255,255,0.05)" } else { "transparent" },
             textarea {
                 resize: "none",
                 display: "block",
                 width: "100%",
                 min_height: "52px",
                 font_size: "11px",
-                padding: "8px",
+                padding: "4px 4px",
                 color: "white",
                 background: "none",
                 border: "none",
-                border_radius: "6px",
+                outline: "none",
                 placeholder: "Style prompt...",
+                onfocus: move |_| focused.set(true),
+                onblur: move |_| focused.set(false),
                 oninput: move |e| styles_action.call(e.value()),
                 "{initial_val}"
             }
@@ -145,8 +150,6 @@ fn WallpaperCard(w: WallpaperData) -> Element {
     let mut like_action = use_action(action_like);
     let mut recreate_action = use_action(action_recreate);
     let mut delete_action = use_action(action_delete);
-    let mut comment_action = use_action(action_comment);
-    let mut comment_signal = use_signal(|| w.comment.clone().unwrap_or_default());
 
     let mut liked_signal = use_signal(|| w.liked_state);
     let mut update_like = move |target: LikedState| {
@@ -158,6 +161,10 @@ fn WallpaperCard(w: WallpaperData) -> Element {
         liked_signal.set(new_state);
         like_action.call(w.id, new_state);
     };
+
+    let mut comment_action = use_action(action_comment);
+    let mut comment_signal = use_signal(|| w.comment.clone().unwrap_or_default());
+    let mut comment_focused = use_signal(|| false);
 
     rsx! {
         div {
@@ -240,27 +247,19 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                 }
             }
 
-            div { padding: "10px",
-                div { display: "flex",
-                    input {
-                        r#type: "text",
-                        flex: "1",
-                        font_size: "11px",
-                        padding: "4px 8px",
-                        background: "none",
-                        border: "none",
-                        border_radius: "6px",
-                        color: "white",
-                        placeholder: "Add a note...",
-                        value: comment_signal(),
-                        oninput: move |evt| {
-                            let val = evt.value();
-                            comment_signal.set(val.clone());
-                            let comment = if val.trim().is_empty() { None } else { Some(val) };
-                            comment_action.call(w.id, comment);
-                        },
-                    }
-                }
+            input {
+                r#type: "text",
+                style: format!("width: 100%; font-size: 11px; padding: 8px 20px; background: {}; border: none; outline: none; color: white;", if comment_focused() { "rgba(255,255,255,0.05)" } else { "transparent" }),
+                placeholder: "Add a note...",
+                value: comment_signal(),
+                onfocus: move |_| comment_focused.set(true),
+                onblur: move |_| comment_focused.set(false),
+                oninput: move |evt| {
+                    let val = evt.value();
+                    comment_signal.set(val.clone());
+                    let comment = if val.trim().is_empty() { None } else { Some(val) };
+                    comment_action.call(w.id, comment);
+                },
             }
         }
     }
@@ -288,6 +287,9 @@ fn IconButton<T: IconShape + Clone + PartialEq + 'static>(
     icon: T,
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
+    let mut hovered = use_signal(|| false);
+    let mut pressed = use_signal(|| false);
+
     rsx!(
         button {
             width: "26px",
@@ -302,6 +304,16 @@ fn IconButton<T: IconShape + Clone + PartialEq + 'static>(
             color: format!("rgba(255, 255, 255, {OVERLAY_TEXT_OPACITY})"),
             cursor: "pointer",
             pointer_events: "auto",
+            transform: if pressed() { "scale(0.9)" } else if hovered() { "scale(1.2)" } else { "scale(1)" },
+            filter: if hovered() { "brightness(1.4)" } else { "brightness(1)" },
+            transition: "transform 0.15s ease, filter 0.15s ease",
+            onmouseenter: move |_| hovered.set(true),
+            onmouseleave: move |_| {
+                hovered.set(false);
+                pressed.set(false);
+            },
+            onmousedown: move |_| pressed.set(true),
+            onmouseup: move |_| pressed.set(false),
             onclick: move |evt| onclick.call(evt),
             Icon {
                 width: 12,
