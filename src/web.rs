@@ -15,12 +15,25 @@ const LIKED_COLOR: &str = "20, 80, 30";
 const DISLIKED_COLOR: &str = "90, 15, 15";
 
 const OVERLAY_OPACITY: &str = "0.7";
-const OVERLAY_TEXT_OPACITY: &str = "0.9";
+const OVERLAY_TEXT_COLOR: &str = "rgba(255, 255, 255, 0.9)";
+const FOCUSED_BG: &str = "rgba(255, 255, 255, 0.05)";
 
 pub fn app() -> Element {
     rsx! {
         document::Title { "Wallpapy" }
         document::Link { rel: "icon", href: asset!("/assets/icon.svg") }
+        document::Script {
+            // Dioxus SSR renders textarea value as an HTML attribute, which browsers ignore for
+            // display — only the DOM `.value` property is shown. This copies the attribute to the
+            // property before Dioxus hydrates, so textareas are populated on first paint.
+            r#"
+                document.addEventListener('DOMContentLoaded', function() {{
+                    document.querySelectorAll('textarea[value]').forEach(function(t) {{
+                        if (!t.value) t.value = t.getAttribute('value');
+                    }});
+                }});
+            "#
+        }
         document::Style {
             r#"
                 * {{
@@ -45,7 +58,11 @@ pub fn app() -> Element {
 #[component]
 fn GalleryPage() -> Element {
     let mut generate_action = use_action(action_generate);
+    let mut styles_action = use_action(action_styles);
     let mut generate_prompt = use_signal(String::new);
+    let mut btn_hovered = use_signal(|| false);
+    let mut btn_pressed = use_signal(|| false);
+    let mut prompt_active = use_signal(|| false);
     let data = use_server_future(load_gallery_data)?;
 
     let (items, style_val) = match data() {
@@ -56,6 +73,8 @@ fn GalleryPage() -> Element {
             };
         }
     };
+
+    let prompt_expanded = prompt_active() || !generate_prompt().is_empty();
 
     rsx! {
         div {
@@ -68,21 +87,54 @@ fn GalleryPage() -> Element {
             top: "0",
             z_index: "100",
             align_items: "center",
-            input {
-                placeholder: "Custom prompt (optional)",
-                value: generate_prompt(),
-                oninput: move |e| generate_prompt.set(e.value()),
-            }
-            button {
-                onclick: move |_| {
-                    let p = generate_prompt();
-                    generate_action.call(if p.trim().is_empty() { None } else { Some(p) });
-                    generate_prompt.set(String::new());
-                },
-                "Generate"
+            div { display: "flex",
+                button {
+                    padding: "6px 14px",
+                    border_radius: "8px 0 0 8px",
+                    border: "none",
+                    color: "white",
+                    cursor: "pointer",
+                    font_size: "13px",
+                    font_weight: "bolder",
+                    background: format!("rgba(80, 140, 90)"),
+                    filter: if btn_hovered() { "brightness(1.5)" } else { "brightness(1)" },
+                    transform: if btn_pressed() { "scale(0.97)" } else { "scale(1)" },
+                    transition: "filter 0.15s ease, transform 0.1s ease",
+                    onmouseenter: move |_| btn_hovered.set(true),
+                    onmouseleave: move |_| {
+                        btn_hovered.set(false);
+                        btn_pressed.set(false);
+                    },
+                    onmousedown: move |_| btn_pressed.set(true),
+                    onmouseup: move |_| btn_pressed.set(false),
+                    onclick: move |_| {
+                        let p = generate_prompt();
+                        generate_action.call(if p.trim().is_empty() { None } else { Some(p) });
+                        generate_prompt.set(String::new());
+                    },
+                    "Generate"
+                }
+                input {
+                    style: format!(
+                        "width: {}; border-radius: 0 8px 8px 0; background: rgba(100, 160, 110); border: none; outline: none; color: white; font-size: 13px; padding: 6px {}; transition: width 0.25s ease, padding 0.25s ease; text-align: left;",
+                        if prompt_expanded { "160px" } else { "30px" },
+                        if prompt_expanded { "10px" } else { "6px" },
+                    ),
+                    placeholder: if prompt_expanded { "Custom prompt..." } else { "✨" },
+                    value: generate_prompt(),
+                    oninput: move |e| generate_prompt.set(e.value()),
+                    onmouseenter: move |_| prompt_active.set(true),
+                    onmouseleave: move |_| prompt_active.set(false),
+                    onfocus: move |_| prompt_active.set(true),
+                    onblur: move |_| prompt_active.set(false),
+                }
             }
         }
-        StyleBox { initial_val: style_val }
+        GhostInput {
+            value: style_val,
+            placeholder: "Style prompt...",
+            oninput: move |val| styles_action.call(val),
+        }
         div {
             display: "grid",
             grid_template_columns: "repeat(auto-fill, minmax(360px, 1fr))",
@@ -96,60 +148,27 @@ fn GalleryPage() -> Element {
 }
 
 #[component]
-fn StyleBox(initial_val: String) -> Element {
-    let mut styles_action = use_action(action_styles);
-    let mut focused = use_signal(|| false);
-    rsx! {
-        div {
-            padding: "4px 8px",
-            background: if focused() { "rgba(255,255,255,0.05)" } else { "transparent" },
-            textarea {
-                resize: "none",
-                display: "block",
-                width: "100%",
-                min_height: "52px",
-                font_size: "11px",
-                padding: "4px 4px",
-                color: "white",
-                background: "none",
-                border: "none",
-                outline: "none",
-                placeholder: "Style prompt...",
-                onfocus: move |_| focused.set(true),
-                onblur: move |_| focused.set(false),
-                oninput: move |e| styles_action.call(e.value()),
-                "{initial_val}"
-            }
-        }
-    }
-}
-
-#[component]
 fn WallpaperCard(w: WallpaperData) -> Element {
-    let now = Utc::now();
-    let diff = now.signed_duration_since(w.datetime);
+    let diff = Utc::now().signed_duration_since(w.datetime);
     let date = if diff.num_weeks() >= 1 || diff.num_milliseconds() < 0 {
         w.datetime.format("%d/%m/%Y %I%P").to_string()
+    } else if diff.num_days() >= 1 {
+        let n = diff.num_days();
+        format!("{n} day{} ago", if n == 1 { "" } else { "s" })
+    } else if diff.num_hours() >= 1 {
+        let n = diff.num_hours();
+        format!("{n} hour{} ago", if n == 1 { "" } else { "s" })
+    } else if diff.num_minutes() >= 1 {
+        let n = diff.num_minutes();
+        format!("{n} minute{} ago", if n == 1 { "" } else { "s" })
     } else {
-        let (n, unit) = if diff.num_days() >= 1 {
-            (diff.num_days(), "day")
-        } else if diff.num_hours() >= 1 {
-            (diff.num_hours(), "hour")
-        } else if diff.num_minutes() >= 1 {
-            (diff.num_minutes(), "minute")
-        } else {
-            (0, "just now")
-        };
-        if unit == "just now" {
-            unit.to_string()
-        } else {
-            format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" })
-        }
+        "just now".to_string()
     };
 
     let mut like_action = use_action(action_like);
     let mut recreate_action = use_action(action_recreate);
     let mut delete_action = use_action(action_delete);
+    let mut comment_action = use_action(action_comment);
 
     let mut liked_signal = use_signal(|| w.liked_state);
     let mut update_like = move |target: LikedState| {
@@ -162,9 +181,7 @@ fn WallpaperCard(w: WallpaperData) -> Element {
         like_action.call(w.id, new_state);
     };
 
-    let mut comment_action = use_action(action_comment);
     let mut comment_signal = use_signal(|| w.comment.clone().unwrap_or_default());
-    let mut comment_focused = use_signal(|| false);
 
     rsx! {
         div {
@@ -188,8 +205,8 @@ fn WallpaperCard(w: WallpaperData) -> Element {
 
                 div {
                     position: "absolute",
-                    top: "0px",
-                    left: "0px",
+                    top: "0",
+                    left: "0",
                     width: "100%",
                     height: "100%",
                     padding: "16px",
@@ -208,17 +225,17 @@ fn WallpaperCard(w: WallpaperData) -> Element {
 
                         div { display: "flex", gap: "4px",
                             IconButton {
-                                color: if liked_signal() == LikedState::Loved { Some(LOVED_COLOR) } else { None },
+                                color: (liked_signal() == LikedState::Loved).then_some(LOVED_COLOR),
                                 icon: fa_solid_icons::FaHeart,
                                 onclick: move |_| update_like(LikedState::Loved),
                             }
                             IconButton {
-                                color: if liked_signal() == LikedState::Liked { Some(LIKED_COLOR) } else { None },
+                                color: (liked_signal() == LikedState::Liked).then_some(LIKED_COLOR),
                                 icon: fa_solid_icons::FaThumbsUp,
                                 onclick: move |_| update_like(LikedState::Liked),
                             }
                             IconButton {
-                                color: if liked_signal() == LikedState::Disliked { Some(DISLIKED_COLOR) } else { None },
+                                color: (liked_signal() == LikedState::Disliked).then_some(DISLIKED_COLOR),
                                 icon: fa_solid_icons::FaThumbsDown,
                                 onclick: move |_| update_like(LikedState::Disliked),
                             }
@@ -238,8 +255,8 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                             color: match liked_signal() {
                                 LikedState::Loved => Some(LOVED_COLOR),
                                 LikedState::Liked => Some(LIKED_COLOR),
-                                LikedState::Neutral => None,
                                 LikedState::Disliked => Some(DISLIKED_COLOR),
+                                LikedState::Neutral => None,
                             },
                             text: w.prompt_data.shortened_prompt,
                         }
@@ -247,19 +264,51 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                 }
             }
 
-            input {
-                r#type: "text",
-                style: format!("width: 100%; font-size: 11px; padding: 8px 20px; background: {}; border: none; outline: none; color: white;", if comment_focused() { "rgba(255,255,255,0.05)" } else { "transparent" }),
-                placeholder: "Add a note...",
+            GhostInput {
                 value: comment_signal(),
-                onfocus: move |_| comment_focused.set(true),
-                onblur: move |_| comment_focused.set(false),
-                oninput: move |evt| {
-                    let val = evt.value();
-                    comment_signal.set(val.clone());
-                    let comment = if val.trim().is_empty() { None } else { Some(val) };
+                placeholder: "Add a note...",
+                single_line: true,
+                oninput: move |val: String| {
+                    let comment = (!val.trim().is_empty()).then(|| val.clone());
+                    comment_signal.set(val);
                     comment_action.call(w.id, comment);
                 },
+            }
+        }
+    }
+}
+
+#[component]
+fn GhostInput(
+    value: String,
+    placeholder: &'static str,
+    #[props(default = false)] single_line: bool,
+    oninput: EventHandler<String>,
+) -> Element {
+    let mut focused = use_signal(|| false);
+    rsx! {
+        div {
+            padding: "4px 8px",
+            background: if focused() { FOCUSED_BG } else { "transparent" },
+            textarea {
+                resize: "none",
+                display: "block",
+                width: "100%",
+                rows: if single_line { "1" } else { "3" },
+                font_size: "11px",
+                padding: "4px",
+                color: "white",
+                background: "none",
+                border: "none",
+                outline: "none",
+                placeholder,
+                onfocus: move |_| focused.set(true),
+                onblur: move |_| focused.set(false),
+                oninput: move |e| {
+                    let val = if single_line { e.value().replace('\n', "") } else { e.value() };
+                    oninput.call(val);
+                },
+                value,
             }
         }
     }
@@ -275,7 +324,7 @@ fn Pill(color: Option<&'static str>, text: String) -> Element {
             font_size: "11px",
             font_weight: "bold",
             background: format!("rgba({}, {OVERLAY_OPACITY})", color.unwrap_or(NEUTRAL_COLOR)),
-            color: format!("rgba(255, 255, 255, {OVERLAY_TEXT_OPACITY})"),
+            color: OVERLAY_TEXT_COLOR,
             "{text}"
         }
     }
@@ -301,7 +350,7 @@ fn IconButton<T: IconShape + Clone + PartialEq + 'static>(
             align_items: "center",
             justify_content: "center",
             background: format!("rgba({}, {OVERLAY_OPACITY})", color.unwrap_or(NEUTRAL_COLOR)),
-            color: format!("rgba(255, 255, 255, {OVERLAY_TEXT_OPACITY})"),
+            color: OVERLAY_TEXT_COLOR,
             cursor: "pointer",
             pointer_events: "auto",
             transform: if pressed() { "scale(0.9)" } else if hovered() { "scale(1.2)" } else { "scale(1)" },
