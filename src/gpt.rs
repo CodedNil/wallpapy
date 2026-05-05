@@ -1,9 +1,8 @@
 use crate::{
-    common::{DatabaseStyle, LikedState, PromptData},
-    server::read_database,
+    common::{LikedState, PromptData},
+    database::read_database,
 };
 use anyhow::{Result, anyhow};
-use log::error;
 use reqwest::{
     Client,
     header::{AUTHORIZATION, CONTENT_TYPE},
@@ -11,7 +10,8 @@ use reqwest::{
 use schemars::{JsonSchema, SchemaGenerator, generate::SchemaSettings};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
-use std::{env, error::Error, sync::LazyLock};
+use std::{env, error::Error, fmt::Write as _, sync::LazyLock};
+use tracing::error;
 
 static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
 
@@ -32,14 +32,8 @@ where
         "model": env::var("OPENROUTER_MODEL").unwrap_or_else(|_| "openai/gpt-oss-120b".to_string()),
         "structured_outputs": true,
         "messages": [
-            {
-                "role": "system",
-                "content": context.join("\n\n")
-            },
-            {
-                "role": "user",
-                "content": message
-            }
+            { "role": "system", "content": context.join("\n\n") },
+            { "role": "user",   "content": message }
         ],
         "response_format": {
             "type": "json_schema",
@@ -64,6 +58,7 @@ where
         .json(&payload)
         .send()
         .await?;
+
     if !response.status().is_success() {
         return Err(format!(
             "Request failed with status {}: {}",
@@ -79,56 +74,47 @@ where
         .and_then(|v| v.as_str())
         .ok_or("Unexpected response structure")?;
 
-    Ok(serde_json::from_str(inner_text)
-        .map_err(|e| format!("Serialization failed: {e} - Outputted text: {inner_text}"))?)
+    serde_json::from_str(inner_text)
+        .map_err(|e| format!("Serialization failed: {e} - Outputted text: {inner_text}").into())
 }
 
-pub async fn generate_prompt() -> Result<(String, String, DatabaseStyle)> {
+/// Returns `(recent_timeline, liked_examples)` strings for use in prompt context.
+pub async fn build_context() -> Result<(String, String, String)> {
     let database = read_database()
         .await
         .inspect_err(|e| error!("Failed accessing database {e:?}"))
         .unwrap_or_default();
 
+    let style_prompt = database.style.clone();
     let wallpapers: Vec<_> = database.wallpapers.into_values().collect();
-    let comments: Vec<_> = database.comments.into_values().collect();
 
-    // Build a unified chronological timeline of wallpapers and comments.
-    let mut timeline: Vec<(
-        chrono::DateTime<chrono::Utc>,
-        Option<&crate::common::WallpaperData>,
-        Option<&crate::common::CommentData>,
-    )> = wallpapers
+    // Chronological timeline of wallpapers (with optional per-image comments).
+    let mut timeline: Vec<(chrono::DateTime<chrono::Utc>, String)> = wallpapers
         .iter()
-        .map(|w| (w.datetime, Some(w), None))
-        .chain(comments.iter().map(|c| (c.datetime, None, Some(c))))
+        .map(|w| {
+            let feedback = match w.liked_state {
+                LikedState::Loved => " [LOVED]",
+                LikedState::Liked => " [liked]",
+                LikedState::Disliked => " [disliked]",
+                LikedState::Neutral => "",
+            };
+            let mut entry = format!("• {}{}", w.prompt_data.shortened_prompt, feedback);
+            if let Some(note) = &w.comment {
+                let _ = write!(entry, "\n  note: {note}");
+            }
+            (w.datetime, entry)
+        })
         .collect();
-    timeline.sort_by_key(|(dt, ..)| *dt);
+    timeline.sort_by_key(|(dt, _)| *dt);
 
-    let recent: Vec<String> = timeline
+    let recent: String = timeline
         .iter()
         .rev()
         .take(50)
-        .filter_map(|(_, wallpaper, comment)| {
-            wallpaper.as_ref().map_or_else(
-                || {
-                    comment
-                        .as_ref()
-                        .map(|c| format!("• [user comment] {}", c.comment))
-                },
-                |w| {
-                    let feedback = match w.liked_state {
-                        LikedState::Loved => " [LOVED]",
-                        LikedState::Liked => " [liked]",
-                        LikedState::Disliked => " [disliked]",
-                        LikedState::Neutral => "",
-                    };
-                    Some(format!("• {}{}", w.prompt_data.shortened_prompt, feedback))
-                },
-            )
-        })
-        .collect();
+        .map(|(_, s)| s.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
 
-    // Loved/liked entries for quality reference — any age.
     let mut liked: Vec<String> = wallpapers
         .iter()
         .filter(|w| matches!(w.liked_state, LikedState::Loved | LikedState::Liked))
@@ -138,16 +124,16 @@ pub async fn generate_prompt() -> Result<(String, String, DatabaseStyle)> {
             } else {
                 "liked"
             };
-            format!("• {} [{}]", w.prompt_data.shortened_prompt, label)
+            format!("• {} [{label}]", w.prompt_data.shortened_prompt)
         })
         .collect();
     liked.sort_unstable();
 
-    Ok((recent.join("\n"), liked.join("\n"), database.style))
+    Ok((recent, liked.join("\n"), style_prompt))
 }
 
 pub async fn generate(message: Option<String>) -> Result<PromptData> {
-    let (recent_history, liked_examples, style) = generate_prompt().await?;
+    let (recent_history, liked_examples, style_prompt) = build_context().await?;
 
     let user_note = message
         .as_deref()
@@ -157,16 +143,12 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
     let mut context = vec![
         format!(
             "You are a creative wallpaper image prompt generator. \
-            Write a vivid, detailed prompt for a desktop wallpaper in a few sentences, no newlines.\n\
-            \n\
-            Style direction: '{}' — weave this naturally into every prompt.\n\
-            Content categories (inspiration only, not exhaustive): '{}'.\n\
-            Never include: '{}'.\n\
-            \n\
-            To keep every wallpaper feeling completely fresh, aim for a design utterly unique to anything seen recently.",
-            style.style.replace('\n', " "),
-            style.contents.replace('\n', " "),
-            style.negative_contents.replace('\n', " "),
+             Write a vivid, detailed prompt for a desktop wallpaper in a few sentences, no newlines, first character capitalised, no colon punctuation or other fancy formatting beyond commas.\n\
+             \n\
+             {style_prompt}\n\
+             \n\
+             To keep every wallpaper feeling completely fresh, aim for a design utterly \
+             unique to anything seen recently."
         ),
         format!(
             "RECENT HISTORY (newest first) — the subject, setting, and mood of each must NOT be repeated:\n{recent_history}"
@@ -176,13 +158,16 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
     if !liked_examples.is_empty() {
         context.push(format!(
             "QUALITY REFERENCE — the user loved/liked these. \
-            Aim for this level of quality and evocativeness, but choose a completely different subject and setting:\n{liked_examples}"
+             Aim for this level of quality and evocativeness, but choose a completely different \
+             subject and setting:\n{liked_examples}"
         ));
     }
 
     llm_parse::<PromptData>(
         context,
-        format!("Generate a wallpaper prompt with a subject, setting, and mood that does not appear in the recent history above.{user_note}"),
+        format!(
+            "Generate a wallpaper prompt with a subject, setting, and mood that does not appear in the recent history above.{user_note}"
+        ),
     )
     .await
     .map_err(|err| anyhow!("Failed to generate prompt: {err}"))

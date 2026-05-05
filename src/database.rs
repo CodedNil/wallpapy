@@ -1,42 +1,32 @@
-use crate::{
-    common::{Database, HasToken},
-    server::auth::verify_token,
-};
 use anyhow::Result;
-use axum::{body::Bytes, http::StatusCode};
-use chrono::Duration;
-use log::error;
-use postcard::from_bytes;
-use serde::de::DeserializeOwned;
-use std::{env, path::PathBuf, sync::LazyLock};
+use axum::http::StatusCode;
+use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, env, path::PathBuf, sync::LazyLock};
 use tokio::fs;
+use tracing::error;
+use uuid::Uuid;
+
+use crate::common::WallpaperData;
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Database {
+    pub style: String,
+    pub wallpapers: HashMap<Uuid, WallpaperData>,
+}
+
+impl Default for Database {
+    fn default() -> Self {
+        Self {
+            style: "Style: Digital paintings, colourful\nContents: Epic fantasy, surreal, abstract, landscapes\nAvoid: No people, don\'t go for highly complex".to_string(),
+            wallpapers: HashMap::default(),
+        }
+    }
+}
 
 static DATA_DIR: LazyLock<PathBuf> =
     LazyLock::new(|| env::var("DATA_DIR").map_or_else(|_| PathBuf::from("data"), PathBuf::from));
 pub static WALLPAPERS_DIR: LazyLock<PathBuf> = LazyLock::new(|| DATA_DIR.join("wallpapers"));
-static AUTH_FILE: LazyLock<PathBuf> = LazyLock::new(|| DATA_DIR.join("auth.ron"));
 static DATABASE_FILE: LazyLock<PathBuf> = LazyLock::new(|| DATA_DIR.join("database.ron"));
-
-mod auth;
-mod commenting;
-mod gpt;
-mod image;
-pub mod routing;
-
-pub async fn decode_and_verify<P>(bytes: Bytes) -> Result<P, StatusCode>
-where
-    P: DeserializeOwned + HasToken,
-{
-    let pkt = from_bytes::<P>(&bytes).map_err(|e| {
-        error!("failed to deserialize packet: {e:?}");
-        StatusCode::BAD_REQUEST
-    })?;
-
-    if !verify_token(pkt.token()).await.unwrap_or(false) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-    Ok(pkt)
-}
 
 pub async fn read_database() -> Result<Database> {
     match fs::read_to_string(&*DATABASE_FILE).await {
@@ -70,19 +60,4 @@ where
     })?;
 
     Ok(result)
-}
-
-fn format_duration(duration: Duration) -> String {
-    let (n, unit) = if duration.num_weeks() >= 1 {
-        (duration.num_weeks(), "week")
-    } else if duration.num_days() >= 1 {
-        (duration.num_days(), "day")
-    } else if duration.num_hours() >= 1 {
-        (duration.num_hours(), "hour")
-    } else if duration.num_minutes() >= 1 {
-        (duration.num_minutes(), "minute")
-    } else {
-        return "less than a minute".to_string();
-    };
-    format!("{n} {unit}{}", if n == 1 { "" } else { "s" })
 }

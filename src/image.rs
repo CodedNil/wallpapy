@@ -1,45 +1,26 @@
 use crate::{
-    common::{
-        ColorData, ImageFile, LikeBody, LikedState, NetworkPacket, PromptData, WallpaperData,
-    },
-    server::{WALLPAPERS_DIR, decode_and_verify, gpt, read_database, with_db, write_database},
+    common::{ImageFile, LikedState, PromptData, WallpaperData},
+    database::{WALLPAPERS_DIR, read_database, write_database},
+    gpt,
 };
 use anyhow::{Result, anyhow};
 use axum::{
-    body::Bytes,
     http::{HeaderMap, HeaderValue, StatusCode},
     response::IntoResponse,
 };
 use chrono::{Timelike, Utc};
 use image::{DynamicImage, GenericImageView, ImageReader, Pixel, imageops::FilterType};
-use log::{error, info};
 use rand::seq::IteratorRandom;
 use reqwest::Client;
 use serde_json::json;
 use std::{env, io::Cursor, sync::LazyLock, time::Duration};
-use thumbhash::rgba_to_thumb_hash;
 use tokio::fs;
+use tracing::{error, info};
 use uuid::Uuid;
 
 const TIMEOUT: u64 = 360;
 
 static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
-
-pub async fn generate(packet: Bytes) -> Result<StatusCode, StatusCode> {
-    let pkt: NetworkPacket<String> = decode_and_verify(packet).await?;
-
-    let prompt = if pkt.data.is_empty() {
-        None
-    } else {
-        Some(pkt.data)
-    };
-    if let Err(e) = generate_wallpaper_impl(None, prompt).await {
-        error!("Failed to generate wallpaper: {e:?}");
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
-    }
-
-    Ok(StatusCode::OK)
-}
 
 async fn serve_file(file_name: String) -> Result<(StatusCode, HeaderMap, Vec<u8>), StatusCode> {
     let path = WALLPAPERS_DIR.join(&file_name);
@@ -109,8 +90,8 @@ pub async fn smartget() -> Result<impl IntoResponse, StatusCode> {
             .into_values()
             .filter(|w| {
                 matches!(w.liked_state, LikedState::Liked | LikedState::Loved)
-                    && w.color_data.top_20_percent_brightness >= brightness_range.0
-                    && w.color_data.top_20_percent_brightness <= brightness_range.1
+                    && w.brightness >= brightness_range.0
+                    && w.brightness <= brightness_range.1
             })
             .choose(&mut rng)
         else {
@@ -120,64 +101,6 @@ pub async fn smartget() -> Result<impl IntoResponse, StatusCode> {
         wallpaper.image_file.file_name
     };
     serve_file(file_name).await
-}
-
-pub async fn remove(packet: Bytes) -> Result<StatusCode, StatusCode> {
-    let pkt: NetworkPacket<Uuid> = decode_and_verify(packet).await?;
-
-    if let Err(e) = remove_wallpaper_impl(pkt.data).await {
-        error!("Failed to remove wallpaper: {e:?}");
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
-    }
-
-    Ok(StatusCode::OK)
-}
-
-pub async fn like(packet: Bytes) -> Result<StatusCode, StatusCode> {
-    let pkt: NetworkPacket<LikeBody> = decode_and_verify(packet).await?;
-
-    // Set the vote state
-    with_db(|db| {
-        let Some(wallpaper) = db.wallpapers.get_mut(&pkt.data.uuid) else {
-            error!("Like: wallpaper not found {}", pkt.data.uuid);
-            return Err(StatusCode::NOT_FOUND);
-        };
-
-        wallpaper.liked_state = if wallpaper.liked_state == pkt.data.liked {
-            LikedState::Neutral
-        } else {
-            pkt.data.liked
-        };
-
-        Ok(StatusCode::OK)
-    })
-    .await
-}
-
-pub async fn recreate(packet: Bytes) -> Result<StatusCode, StatusCode> {
-    let pkt: NetworkPacket<Uuid> = decode_and_verify(packet).await?;
-
-    // Get the prompt
-    let prompt_data = read_database()
-        .await
-        .map_err(|e| {
-            error!("DB read failed: {e:?}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .wallpapers
-        .get(&pkt.data)
-        .map(|w| w.prompt_data.clone())
-        .ok_or_else(|| {
-            error!("Recreate: wallpaper not found {}", pkt.data);
-            StatusCode::NOT_FOUND
-        })?;
-
-    if let Err(e) = generate_wallpaper_impl(Some(prompt_data), None).await {
-        error!("Failed to recreate image: {e:?}");
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
-    }
-
-    Ok(StatusCode::OK)
 }
 
 pub async fn generate_wallpaper_impl(
@@ -192,7 +115,6 @@ pub async fn generate_wallpaper_impl(
     let api_token =
         env::var("REPLICATE_API_TOKEN").expect("REPLICATE_API_TOKEN environment variable not set");
 
-    // Generate image prompt
     let prompt_data = if let Some(prompt_data) = prompt_data {
         prompt_data
     } else {
@@ -201,17 +123,8 @@ pub async fn generate_wallpaper_impl(
         new
     };
 
-    // Generate image
     let (image_url, image) = image_diffusion(client, &api_token, &prompt_data.prompt).await?;
     info!("Generated image: {}", &image_url);
-
-    // Resize the image to thumbnail
-    let thumbnail = image.thumbnail(32, 32);
-    let thumbhash = rgba_to_thumb_hash(
-        thumbnail.width() as usize,
-        thumbnail.height() as usize,
-        thumbnail.into_rgba8().as_raw(),
-    );
 
     let datetime_str = datetime.to_rfc3339();
 
@@ -240,23 +153,17 @@ pub async fn generate_wallpaper_impl(
         height: thumb_image.height(),
     };
 
-    // Calculate average color and brightness
-    let color_data = calculate_color_data(&thumb_image);
-
     let wallpaper = WallpaperData {
         id,
         datetime,
-
         prompt_data,
         image_file,
-        color_data,
-
+        brightness: top_20_percent_brightness(&thumb_image),
         thumbnail_file,
-        thumbhash,
         liked_state: LikedState::Neutral,
+        comment: None,
     };
 
-    // Store a new database entry
     let mut database = read_database().await?;
     database.wallpapers.insert(id, wallpaper);
     write_database(&database).await?;
@@ -264,119 +171,29 @@ pub async fn generate_wallpaper_impl(
     Ok(())
 }
 
-fn calculate_color_data(img: &DynamicImage) -> ColorData {
-    let (width, height) = img.dimensions();
-    let total_pixels = (width * height) as f32;
+fn top_20_percent_brightness(img: &DynamicImage) -> f32 {
+    let mut brightness_values =
+        img.pixels()
+            .fold(Vec::new(), |mut brightness_values, (_, _, pixel)| {
+                let [r, g, b] = pixel.to_rgb().0;
+                let (r, g, b) = (
+                    f32::from(r) / 255.0,
+                    f32::from(g) / 255.0,
+                    f32::from(b) / 255.0,
+                );
+                let brightness = 0.114f32.mul_add(b, 0.299f32.mul_add(r, 0.587f32 * g));
+                brightness_values.push(brightness);
+                brightness_values
+            });
 
-    // Sum up all the RGB values and brightness
-    let (sum_r, sum_g, sum_b, mut brightness_values) = img.pixels().fold(
-        (0.0, 0.0, 0.0, Vec::new()),
-        |(acc_r, acc_g, acc_b, mut brightness_values), (_, _, pixel)| {
-            let [r, g, b] = pixel.to_rgb().0;
-            let (r, g, b) = (
-                f32::from(r) / 255.0,
-                f32::from(g) / 255.0,
-                f32::from(b) / 255.0,
-            );
-            let brightness = 0.114f32.mul_add(b, 0.299f32.mul_add(r, 0.587f32 * g));
-            brightness_values.push(brightness);
-            (acc_r + r, acc_g + g, acc_b + b, brightness_values)
-        },
-    );
-
-    let avg_r = sum_r / total_pixels;
-    let avg_g = sum_g / total_pixels;
-    let avg_b = sum_b / total_pixels;
-
-    let (hue, saturation, lightness) = rgb_to_hsl(avg_r, avg_g, avg_b);
-    let chroma = calculate_chroma_hsl(lightness, saturation);
-
-    // Compute brightness percentiles
     brightness_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let (top_20_percent_brightness, bottom_20_percent_brightness) = if brightness_values.is_empty()
-    {
-        (0.0, 0.0)
+    if brightness_values.is_empty() {
+        0.0
     } else {
         let len = brightness_values.len();
         let top_index = ((len as f32) * 0.80).ceil() as usize - 1;
-        let bottom_index = ((len as f32) * 0.20).floor() as usize;
-        (
-            brightness_values[top_index.min(len - 1)],
-            brightness_values[bottom_index.min(len - 1)],
-        )
-    };
-
-    // Calculate contrast ratio
-    let contrast_ratio = (top_20_percent_brightness + 0.05) / (bottom_20_percent_brightness + 0.05);
-
-    ColorData {
-        average_color: (avg_r, avg_g, avg_b),
-        hue,
-        saturation,
-        lightness,
-        chroma,
-        top_20_percent_brightness,
-        bottom_20_percent_brightness,
-        contrast_ratio,
+        brightness_values[top_index.min(len - 1)]
     }
-}
-
-/// Convert RGB to HSL, each value is in the range [0,1]
-fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
-    let max = r.max(g).max(b);
-    let min = r.min(g).min(b);
-    let lightness = (max + min) * 0.5;
-    let delta = max - min;
-
-    if delta.abs() < f32::EPSILON {
-        return (0.0, 0.0, lightness);
-    }
-
-    let saturation = if lightness > 0.5 {
-        delta / (2.0 - max - min)
-    } else {
-        delta / (max + min)
-    };
-
-    let hue = if (max - r).abs() < f32::EPSILON {
-        ((g - b) / delta + if g < b { 6.0 } else { 0.0 }) / 6.0
-    } else if (max - g).abs() < f32::EPSILON {
-        ((b - r) / delta + 2.0) / 6.0
-    } else {
-        ((r - g) / delta + 4.0) / 6.0
-    };
-
-    (hue, saturation, lightness)
-}
-
-/// Calculate chroma (perceived intensity of color) from hue and saturation in HSL.
-fn calculate_chroma_hsl(lightness: f32, saturation: f32) -> f32 {
-    (1.0 - 2.0f32.mul_add(lightness, -1.0).abs()) * saturation
-}
-
-async fn remove_wallpaper_impl(id: Uuid) -> Result<()> {
-    let mut database = read_database().await?;
-
-    let wallpaper = database
-        .wallpapers
-        .remove(&id)
-        .ok_or_else(|| anyhow!("No entry found for UUID"))?;
-
-    // Remove all associated files
-    for file_name in [
-        &wallpaper.image_file.file_name,
-        &wallpaper.thumbnail_file.file_name,
-    ] {
-        let file_path = WALLPAPERS_DIR.join(file_name);
-        if file_path.exists() {
-            fs::remove_file(file_path).await?;
-        }
-    }
-
-    // Save the updated database
-    write_database(&database).await?;
-
-    Ok(())
 }
 
 /// <https://replicate.com/bytedance/seedream-4>

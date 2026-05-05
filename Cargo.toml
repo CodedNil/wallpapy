@@ -1,84 +1,49 @@
 [package]
 name = "wallpapy"
-version = "0.7.2"
+version = "0.8.0"
 edition = "2024"
 
 [dependencies]
-log = "0.4.29"
+dioxus = { version = "=0.7.5", features = ["fullstack"] }
+dioxus-free-icons = { version = "0.10", features = ["font-awesome-solid"] }
+wasm-bindgen = "=0.2.118"
+
+tracing = "0.1.44"
 anyhow = "1.0.102"
-postcard = { version = "1.1.3", features = ["alloc"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-parking_lot = "0.12.5"
-uuid = { version = "1.23.1", features = ["v4", "fast-rng", "js", "serde"] }
-thumbhash = "0.1.0"
+uuid = { version = "1.23.1", features = ["v4", "fast-rng", "serde", "js"] }
 chrono = { version = "0.4.44", features = ["serde"] }
-image = { version = "0.25.10", default-features = false, features = [
-    "jpeg",
-    "webp",
-] }
-bitflags = "2.11.1"
 schemars = "1.2.1"
-
-# GUI dependencies
-egui = { version = "0.34.1", features = ["serde"], optional = true }
-eframe = { version = "0.34.1", default-features = false, features = [
-    "default_fonts",
-    "glow",
-    "persistence",
-    "wayland",
-], optional = true }
-egui-notify = { version = "0.22.0", optional = true }
-ehttp = { version = "0.7.1", optional = true }
-egui_extras = { version = "0.34.1", features = [
-    "http",
-    "image",
-    "webp",
-], optional = true }
-egui_pull_to_refresh = { version = "0.11.0", optional = true }
-egui_thumbhash = { version = "0.10.0", optional = true }
-egui-phosphor = { version = "0.12.0", optional = true }
-
-# WebAssembly dependencies
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-web-sys = "=0.3.94"
-wasm-bindgen = "=0.2.117"
-wasm-bindgen-futures = "=0.4.67"
-
-# Server dependencies
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-simple_logger = "5.2.0"
-dotenvy = "0.15.7"
-reqwest = { version = "0.13.2", features = ["json"] }
-tokio = { version = "1.52.1", features = ["full"] }
 ron = "0.12.1"
-axum = { version = "0.8.9", default-features = false, features = [
-    "http1",
-    "tokio",
-] }
+rand = "0.10.1"
+mime_guess = "2.0.5"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+dotenvy = "0.15.7"
+reqwest = { version = "0.13.3", features = ["json"] }
+tokio = { version = "1.52.2", features = ["full"] }
+axum = { version = "0.8.9", features = ["http1", "tokio"] }
 tower-http = { version = "0.6.8", features = [
     "fs",
     "async-compression",
     "compression-deflate",
     "compression-gzip",
 ] }
-rand = "0.10.1"
-argon2 = { version = "0.5.3", features = ["std"] }
-mime_guess = "2.0.5"
+image = { version = "0.25.10", default-features = false, features = [
+    "jpeg",
+    "webp",
+] }
 webp = "0.3.1"
+tokio-stream = { version = "0.1.18", features = ["sync"] }
 
 [features]
-default = ["gui"]
-gui = [
-    "egui",
-    "eframe",
-    "egui-notify",
-    "ehttp",
-    "egui_extras",
-    "egui_pull_to_refresh",
-    "egui_thumbhash",
-    "egui-phosphor",
-]
+default = []
+server = ["dioxus/server"]
+web = ["dioxus/web"]
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -1,102 +1,50 @@
-use std::{env, sync::LazyLock};
-
 mod common;
+mod routing;
+mod web;
 
-#[cfg(feature = "gui")]
-mod client;
+#[cfg(feature = "server")]
+mod database;
+#[cfg(feature = "server")]
+mod gpt;
+#[cfg(feature = "server")]
+mod image;
 
-#[cfg(not(target_arch = "wasm32"))]
-mod server;
+fn main() {
+    #[cfg(feature = "web")]
+    dioxus::launch(web::app);
 
-static PORT: LazyLock<u16> =
-    LazyLock::new(|| env::var("PORT").map_or_else(|_| 4560, |port| port.parse().unwrap_or(4560)));
-
-#[cfg(not(target_arch = "wasm32"))]
-#[tokio::main]
-async fn main() {
-    #[cfg(debug_assertions)]
-    dotenvy::dotenv().ok();
-
-    simple_logger::SimpleLogger::new()
-        .with_level(log::LevelFilter::Info)
-        .init()
-        .unwrap();
-
-    // Make data dir if it doesn't exist
-    std::fs::create_dir_all(&*server::WALLPAPERS_DIR).unwrap();
-
-    // Set up router
-    let app = server::routing::setup_routes(
-        axum::Router::new()
-            .fallback_service(tower_http::services::ServeDir::new(
-                env::var("DIST_DIR").unwrap_or_else(|_| "dist".into()),
-            ))
-            .nest_service(
-                "/wallpapers",
-                tower_http::services::ServeDir::new(&*server::WALLPAPERS_DIR),
-            )
-            .layer(tower_http::compression::CompressionLayer::new()),
-    );
-
-    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], *PORT));
-    println!("Listening on {addr}");
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-
-    tokio::spawn(server::routing::start_server());
-
-    #[cfg(not(feature = "gui"))]
-    axum::serve(listener, app).await.unwrap();
-
-    #[cfg(feature = "gui")]
-    {
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
-        let native_options = eframe::NativeOptions {
-            viewport: egui::ViewportBuilder::default()
-                .with_inner_size([400.0, 300.0])
-                .with_min_inner_size([300.0, 220.0])
-                .with_icon(
-                    eframe::icon_data::from_png_bytes(
-                        &include_bytes!("../assets/icon-256.png")[..],
-                    )
-                    .unwrap(),
-                ),
-            ..Default::default()
-        };
-        let _ = eframe::run_native(
-            "Wallpapy",
-            native_options,
-            Box::new(|cc| Ok(Box::new(client::app::Wallpapy::new(cc)))),
-        );
-    }
+    #[cfg(feature = "server")]
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async move { server_run().await });
 }
 
-#[cfg(target_arch = "wasm32")]
-fn main() {
-    use eframe::wasm_bindgen::JsCast as _;
-    eframe::WebLogger::init(log::LevelFilter::Info).ok(); // Redirect `log` message to `console.log`
+#[cfg(feature = "server")]
+async fn server_run() {
+    use axum::routing::get;
+    use dioxus::{
+        prelude::dioxus_server::{FullstackState, ServeConfig},
+        server::DioxusRouterExt,
+    };
+    use tower_http::{compression::CompressionLayer, services::ServeDir};
 
-    let web_options = eframe::WebOptions::default();
+    #[cfg(debug_assertions)]
+    dotenvy::dotenv().ok();
+    std::fs::create_dir_all(&*database::WALLPAPERS_DIR).unwrap();
+    tokio::spawn(routing::start_server());
 
-    wasm_bindgen_futures::spawn_local(async {
-        let document = web_sys::window()
-            .expect("No window")
-            .document()
-            .expect("No document");
-        let canvas = document
-            .get_element_by_id("wallpapy_canvas")
-            .expect("Failed to find wallpapy_canvas")
-            .dyn_into::<web_sys::HtmlCanvasElement>()
-            .expect("wallpapy_canvas was not a HtmlCanvasElement");
+    let app = axum::Router::<FullstackState>::new()
+        .nest_service("/wallpapers", ServeDir::new(&*database::WALLPAPERS_DIR))
+        .nest_service("/static", ServeDir::new("assets"))
+        .route("/latest", get(crate::image::latest))
+        .route("/favourites", get(crate::image::favourites))
+        .route("/smartget", get(crate::image::smartget))
+        .serve_dioxus_application(ServeConfig::new(), web::app)
+        .layer(CompressionLayer::new());
 
-        eframe::WebRunner::new()
-            .start(
-                canvas,
-                web_options,
-                Box::new(|cc| Ok(Box::new(client::app::Wallpapy::new(cc)))),
-            )
-            .await
-            .expect("failed to start eframe");
-    });
+    let addr = dioxus::cli_config::fullstack_address_or_localhost();
+    tracing::info!("Listening on {addr}");
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+
+    axum::serve(listener, app).await.unwrap();
 }
