@@ -16,13 +16,13 @@ const DISLIKED_COLOR: &str = "90, 15, 15";
 
 const OVERLAY_OPACITY: &str = "0.7";
 const OVERLAY_TEXT_COLOR: &str = "rgba(255, 255, 255, 0.9)";
-const FOCUSED_BG: &str = "rgba(255, 255, 255, 0.05)";
 
 pub fn app() -> Element {
     let mut fullscreen_id = use_context_provider(|| Signal::new(None::<uuid::Uuid>));
 
     rsx! {
         document::Title { "Wallpapy" }
+        document::Meta { name: "darkreader-lock" }
         document::Link { rel: "icon", href: asset!("/assets/icon.svg") }
         document::Script {
             // Dioxus SSR renders textarea value as an HTML attribute, which browsers ignore for
@@ -46,6 +46,8 @@ pub fn app() -> Element {
 
                 body {{
                     background-image: url("/smartget");
+                    background-color: rgba(0, 0, 0, 0.4);
+                    background-blend-mode: multiply;
                     background-size: cover;
                     color: white;
                     font-family: sans-serif;
@@ -203,13 +205,11 @@ fn WallpaperCard(w: WallpaperData) -> Element {
             id: "{w.id}",
             border_radius: "26px",
             overflow: "hidden",
-            background: "#1a1a24",
             grid_column: if is_fullscreen { "1 / -1" } else { "auto" },
             min_width: "100%",
             width: "100%",
-            transition: "box-shadow 0.4s cubic-bezier(0.33, 1, 0.68, 1), transform 0.4s cubic-bezier(0.33, 1, 0.68, 1)",
-            box_shadow: if hovered() { "0 0 30px 3px rgba(255, 255, 255, 0.4)" } else { "0 0 0px 1px rgba(255, 255, 255, 0.2)" },
-            transform: if hovered() { "translateY(-6px)" } else { "translateY(0)" },
+            transition: "box-shadow 0.4s cubic-bezier(0.33, 1, 0.68, 1)",
+            box_shadow: if hovered() { "0 0 20px 4px rgba(20, 20, 20, 0.6)" } else { "0 0 12px 4px rgba(20, 20, 20, 0.4)" },
 
             div {
                 display: "block",
@@ -322,6 +322,7 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                 value: comment_signal(),
                 placeholder: "Add a note...",
                 single_line: true,
+                maxlength: 54,
                 oninput: move |val: String| {
                     let comment = (!val.trim().is_empty()).then(|| val.clone());
                     comment_signal.set(val);
@@ -337,33 +338,33 @@ fn GhostInput(
     value: String,
     placeholder: &'static str,
     #[props(default = false)] single_line: bool,
+    #[props(default = 1000)] maxlength: usize,
     oninput: EventHandler<String>,
 ) -> Element {
     let mut focused = use_signal(|| false);
     rsx! {
-        div {
-            padding: "4px 8px",
-            background: if focused() { FOCUSED_BG } else { "transparent" },
-            textarea {
-                resize: "none",
-                display: "block",
-                width: "100%",
-                rows: if single_line { "1" } else { "3" },
-                font_size: "11px",
-                padding: "4px",
-                color: "white",
-                background: "none",
-                border: "none",
-                outline: "none",
-                placeholder,
-                onfocus: move |_| focused.set(true),
-                onblur: move |_| focused.set(false),
-                oninput: move |e| {
-                    let val = if single_line { e.value().replace('\n', "") } else { e.value() };
-                    oninput.call(val);
-                },
-                value,
-            }
+        textarea {
+            maxlength,
+            resize: "none",
+            display: "block",
+            width: "100%",
+            rows: if single_line { "1" } else { "3" },
+            font_size: "11px",
+            font_weight: "bold",
+            padding: "8px 20px",
+            color: "black",
+            background: format!("rgba(240, 240, 240, {})", if focused() { "0.7" } else { "0.3" }),
+            backdrop_filter: "blur(20px)",
+            border: "none",
+            outline: "none",
+            placeholder,
+            onfocus: move |_| focused.set(true),
+            onblur: move |_| focused.set(false),
+            oninput: move |e| {
+                let val = if single_line { e.value().replace('\n', "") } else { e.value() };
+                oninput.call(val);
+            },
+            value,
         }
     }
 }

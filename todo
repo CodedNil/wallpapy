@@ -1,7 +1,8 @@
 Implement auth https://dioxuslabs.com/learn/0.7/essentials/fullstack/authentication
 Reimplement filters in current gallery, including a filter for smartget which would return potential candidates
 Notification pings tracking current generations etc
-Have dioxus config serve the static assets instead of custom implementation
 clean fullscreen with animation and scroll to
+custom font
 
 switch to avif - remove thumbnail
+make serving images deterministic not random, ditch rand
