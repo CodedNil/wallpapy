@@ -45,7 +45,8 @@ pub fn app() -> Element {
                 }}
 
                 body {{
-                    background: rgb(17, 17, 24);
+                    background-image: url("/smartget");
+                    background-size: cover;
                     color: white;
                     font-family: sans-serif;
                     font-size: 14px;
@@ -148,8 +149,8 @@ fn GalleryPage() -> Element {
         div {
             display: "grid",
             grid_template_columns: "repeat(auto-fill, minmax(360px, 1fr))",
-            gap: "10px",
-            padding: "10px",
+            gap: "20px",
+            padding: "20px",
             for w in items {
                 WallpaperCard { key: "{w.id}", w }
             }
@@ -192,6 +193,7 @@ fn WallpaperCard(w: WallpaperData) -> Element {
     };
 
     let mut comment_signal = use_signal(|| w.comment.clone().unwrap_or_default());
+    let mut hovered = use_signal(|| false);
 
     let mut fullscreen_id = use_context::<Signal<Option<uuid::Uuid>>>();
     let is_fullscreen = fullscreen_id() == Some(w.id);
@@ -205,6 +207,9 @@ fn WallpaperCard(w: WallpaperData) -> Element {
             grid_column: if is_fullscreen { "1 / -1" } else { "auto" },
             min_width: "100%",
             width: "100%",
+            transition: "box-shadow 0.4s cubic-bezier(0.33, 1, 0.68, 1), transform 0.4s cubic-bezier(0.33, 1, 0.68, 1)",
+            box_shadow: if hovered() { "0 0 30px 3px rgba(255, 255, 255, 0.4)" } else { "0 0 0px 1px rgba(255, 255, 255, 0.2)" },
+            transform: if hovered() { "translateY(-6px)" } else { "translateY(0)" },
 
             div {
                 display: "block",
@@ -219,6 +224,9 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                         fullscreen_id.set(Some(w.id));
                     }
                 },
+                onmouseenter: move |_| hovered.set(true),
+                onmouseleave: move |_| hovered.set(false),
+
                 img {
                     width: "100%",
                     height: "100%",
@@ -226,6 +234,9 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                     display: "block",
                     src: "/wallpapers/{w.image_file.file_name}",
                     loading: "lazy",
+                    transition: "transform 0.6s cubic-bezier(0.33, 1, 0.68, 1), filter 0.6s cubic-bezier(0.33, 1, 0.68, 1)",
+                    transform: if hovered() { "scale(1.1)" } else { "scale(1)" },
+                    filter: if hovered() { "brightness(1.1)" } else { "brightness(1)" },
                 }
 
                 div {
