@@ -19,6 +19,8 @@ const OVERLAY_TEXT_COLOR: &str = "rgba(255, 255, 255, 0.9)";
 const FOCUSED_BG: &str = "rgba(255, 255, 255, 0.05)";
 
 pub fn app() -> Element {
+    let mut fullscreen_id = use_context_provider(|| Signal::new(None::<uuid::Uuid>));
+
     rsx! {
         document::Title { "Wallpapy" }
         document::Link { rel: "icon", href: asset!("/assets/icon.svg") }
@@ -51,7 +53,15 @@ pub fn app() -> Element {
                 }}
             "#
         }
-        GalleryPage {}
+        div {
+            tabindex: "0",
+            onkeydown: move |e| {
+                if e.key() == Key::Escape {
+                    fullscreen_id.set(None);
+                }
+            },
+            GalleryPage {}
+        }
     }
 }
 
@@ -183,23 +193,38 @@ fn WallpaperCard(w: WallpaperData) -> Element {
 
     let mut comment_signal = use_signal(|| w.comment.clone().unwrap_or_default());
 
+    let mut fullscreen_id = use_context::<Signal<Option<uuid::Uuid>>>();
+    let is_fullscreen = fullscreen_id() == Some(w.id);
+
     rsx! {
         div {
+            id: "{w.id}",
             border_radius: "26px",
             overflow: "hidden",
             background: "#1a1a24",
+            grid_column: if is_fullscreen { "1 / -1" } else { "auto" },
+            min_width: "100%",
+            width: "100%",
 
-            a {
+            div {
                 display: "block",
                 position: "relative",
                 aspect_ratio: "16 / 9",
                 overflow: "hidden",
+                cursor: "pointer",
+                onclick: move |_| {
+                    if is_fullscreen {
+                        fullscreen_id.set(None);
+                    } else {
+                        fullscreen_id.set(Some(w.id));
+                    }
+                },
                 img {
                     width: "100%",
                     height: "100%",
                     object_fit: "cover",
                     display: "block",
-                    src: "/wallpapers/{w.thumbnail_file.file_name}",
+                    src: "/wallpapers/{w.image_file.file_name}",
                     loading: "lazy",
                 }
 
@@ -223,29 +248,47 @@ fn WallpaperCard(w: WallpaperData) -> Element {
 
                         Pill { text: date }
 
-                        div { display: "flex", gap: "4px",
+                        div {
+                            display: "flex",
+                            gap: "4px",
+                            pointer_events: "auto",
                             IconButton {
                                 color: (liked_signal() == LikedState::Loved).then_some(LOVED_COLOR),
                                 icon: fa_solid_icons::FaHeart,
-                                onclick: move |_| update_like(LikedState::Loved),
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    update_like(LikedState::Loved);
+                                },
                             }
                             IconButton {
                                 color: (liked_signal() == LikedState::Liked).then_some(LIKED_COLOR),
                                 icon: fa_solid_icons::FaThumbsUp,
-                                onclick: move |_| update_like(LikedState::Liked),
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    update_like(LikedState::Liked);
+                                },
                             }
                             IconButton {
                                 color: (liked_signal() == LikedState::Disliked).then_some(DISLIKED_COLOR),
                                 icon: fa_solid_icons::FaThumbsDown,
-                                onclick: move |_| update_like(LikedState::Disliked),
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    update_like(LikedState::Disliked);
+                                },
                             }
                             IconButton {
                                 icon: fa_solid_icons::FaArrowRotateLeft,
-                                onclick: move |_| recreate_action.call(w.id),
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    recreate_action.call(w.id);
+                                },
                             }
                             IconButton {
                                 icon: fa_solid_icons::FaTrash,
-                                onclick: move |_| delete_action.call(w.id),
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    delete_action.call(w.id);
+                                },
                             }
                         }
                     }

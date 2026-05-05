@@ -1,11 +1,9 @@
 Implement auth https://dioxuslabs.com/learn/0.7/essentials/fullstack/authentication
-Fixed port in dioxus config
-Reimplement fullscreen view
 Reimplement filters in current gallery, including a filter for smartget which would return potential candidates
 Notification pings tracking current generations etc
 Have dioxus config serve the static assets instead of custom implementation
 
-button hover animation
 card hover animation
+clean fullscreen with animation and scroll to
 
-switch to avif
+switch to avif - remove thumbnail
