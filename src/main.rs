@@ -35,7 +35,6 @@ async fn server_run() {
 
     let app = axum::Router::<FullstackState>::new()
         .nest_service("/wallpapers", ServeDir::new(&*database::WALLPAPERS_DIR))
-        .nest_service("/static", ServeDir::new("assets"))
         .route("/latest", get(crate::image::latest))
         .route("/favourites", get(crate::image::favourites))
         .route("/smartget", get(crate::image::smartget))
@@ -43,8 +42,6 @@ async fn server_run() {
         .layer(CompressionLayer::new());
 
     let addr = dioxus::cli_config::fullstack_address_or_localhost();
-    tracing::info!("Listening on {addr}");
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-
     axum::serve(listener, app).await.unwrap();
 }

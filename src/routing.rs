@@ -1,18 +1,17 @@
 use crate::common::{LikedState, WallpaperData};
-#[cfg(feature = "server")]
-use crate::database::{WALLPAPERS_DIR, read_database, with_db};
-#[cfg(feature = "server")]
-use crate::image::generate_wallpaper_impl;
-#[cfg(feature = "server")]
-use axum::http::StatusCode;
-#[cfg(feature = "server")]
 use chrono::{Duration, Utc};
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "server")]
-use tokio::fs;
 use tracing::{error, info};
 use uuid::Uuid;
+
+#[cfg(feature = "server")]
+use crate::{
+    database::{WALLPAPERS_DIR, read_database, with_db},
+    image::generate_wallpaper_impl,
+};
+#[cfg(feature = "server")]
+use axum::http::StatusCode;
 
 #[cfg(feature = "server")]
 const NEW_WALLPAPER_INTERVAL: Duration = Duration::hours(6);
@@ -28,11 +27,6 @@ pub async fn start_server() {
                     .values()
                     .max_by_key(|w| w.datetime)
                     .map_or(cur_time, |w| w.datetime);
-
-                info!(
-                    "Time since last wallpaper: {}",
-                    format_duration(cur_time - latest_time)
-                );
 
                 if cur_time - latest_time > NEW_WALLPAPER_INTERVAL
                     && let Err(e) = generate_wallpaper_impl(None, None).await
@@ -107,7 +101,7 @@ pub async fn action_delete(id: Uuid) -> Result<(), ServerFnError> {
     for file_name in files_to_remove {
         let file_path = WALLPAPERS_DIR.join(file_name);
         if file_path.exists() {
-            fs::remove_file(file_path)
+            tokio::fs::remove_file(file_path)
                 .await
                 .map_err(|e| ServerFnError::new(format!("File removal failed: {e}")))?;
         }
@@ -164,20 +158,4 @@ pub async fn action_styles(style_prompt: String) -> Result<(), ServerFnError> {
     })
     .await
     .map_err(|e| ServerFnError::new(format!("styles failed: {e:?}")))
-}
-
-#[cfg(feature = "server")]
-pub fn format_duration(duration: Duration) -> String {
-    let (n, unit) = if duration.num_weeks() >= 1 {
-        (duration.num_weeks(), "week")
-    } else if duration.num_days() >= 1 {
-        (duration.num_days(), "day")
-    } else if duration.num_hours() >= 1 {
-        (duration.num_hours(), "hour")
-    } else if duration.num_minutes() >= 1 {
-        (duration.num_minutes(), "minute")
-    } else {
-        return "less than a minute".to_string();
-    };
-    format!("{n} {unit}{}", if n == 1 { "" } else { "s" })
 }

@@ -5,25 +5,25 @@ edition = "2024"
 
 [dependencies]
 dioxus = { version = "=0.7.5", features = ["fullstack"] }
-dioxus-free-icons = { version = "0.10", features = ["font-awesome-solid"] }
+dioxus-free-icons = { version = "0.10.0", features = ["font-awesome-solid"] }
 wasm-bindgen = "=0.2.118"
 
 tracing = "0.1.44"
 anyhow = "1.0.102"
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
 uuid = { version = "1.23.1", features = ["v4", "fast-rng", "serde", "js"] }
 chrono = { version = "0.4.44", features = ["serde"] }
 schemars = "1.2.1"
-ron = "0.12.1"
-rand = "0.10.1"
-mime_guess = "2.0.5"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 dotenvy = "0.15.7"
+ron = "0.12.1"
+serde_json = "1.0.149"
+rand = "0.10.1"
+mime_guess = "2.0.5"
 reqwest = { version = "0.13.3", features = ["json"] }
 tokio = { version = "1.52.2", features = ["full"] }
 axum = { version = "0.8.9", features = ["http1", "tokio"] }

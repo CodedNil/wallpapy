@@ -5,6 +5,7 @@ use crate::{
         action_styles, load_gallery_data,
     },
 };
+use chrono::Utc;
 use dioxus::prelude::*;
 use dioxus_free_icons::{Icon, IconShape, icons::fa_solid_icons};
 
@@ -18,7 +19,25 @@ const OVERLAY_TEXT_OPACITY: &str = "0.9";
 
 pub fn app() -> Element {
     rsx! {
-        document::Link { rel: "stylesheet", href: "/static/style.css" }
+        document::Title { "Wallpapy" }
+        document::Link { rel: "icon", href: asset!("/assets/icon.svg") }
+        document::Style {
+            r#"
+                * {{
+                    box-sizing: border-box;
+                    margin: 0;
+                    padding: 0;
+                }}
+
+                body {{
+                    background: rgb(17, 17, 24);
+                    color: white;
+                    font-family: sans-serif;
+                    font-size: 14px;
+                    min-height: 100vh;
+                }}
+            "#
+        }
         GalleryPage {}
     }
 }
@@ -102,7 +121,26 @@ fn StyleBox(initial_val: String) -> Element {
 
 #[component]
 fn WallpaperCard(w: WallpaperData) -> Element {
-    let date = w.datetime.format("%Y-%m-%d").to_string();
+    let now = Utc::now();
+    let diff = now.signed_duration_since(w.datetime);
+    let date = if diff.num_weeks() >= 1 || diff.num_milliseconds() < 0 {
+        w.datetime.format("%d/%m/%Y %I%P").to_string()
+    } else {
+        let (n, unit) = if diff.num_days() >= 1 {
+            (diff.num_days(), "day")
+        } else if diff.num_hours() >= 1 {
+            (diff.num_hours(), "hour")
+        } else if diff.num_minutes() >= 1 {
+            (diff.num_minutes(), "minute")
+        } else {
+            (0, "just now")
+        };
+        if unit == "just now" {
+            unit.to_string()
+        } else {
+            format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" })
+        }
+    };
 
     let mut like_action = use_action(action_like);
     let mut recreate_action = use_action(action_recreate);
