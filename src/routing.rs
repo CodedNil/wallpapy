@@ -1,23 +1,68 @@
-use crate::common::{LikedState, WallpaperData};
-use chrono::{Duration, Utc};
-use dioxus::prelude::*;
-use serde::{Deserialize, Serialize};
-use tracing::{error, info};
-use uuid::Uuid;
-
-#[cfg(feature = "server")]
 use crate::{
-    database::{WALLPAPERS_DIR, read_database, with_db},
+    common::{GenerationEvent, GenerationStage},
+    database::read_database,
     image::generate_wallpaper_impl,
 };
-#[cfg(feature = "server")]
-use axum::http::StatusCode;
+use chrono::{Duration, Utc};
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock};
+use tokio::sync::{Mutex, broadcast};
+use tracing::error;
+use uuid::Uuid;
 
-#[cfg(feature = "server")]
+pub static GENERATION_EVENTS: LazyLock<Arc<Mutex<HashMap<Uuid, GenerationEvent>>>> =
+    LazyLock::new(|| Arc::new(Mutex::new(HashMap::new())));
+
+pub static EVENTS_SENDER: LazyLock<broadcast::Sender<Vec<GenerationEvent>>> =
+    LazyLock::new(|| broadcast::channel(16).0);
+
+pub async fn update_generation_event(id: Uuid, stage: GenerationStage) {
+    let snapshot = {
+        let mut events = GENERATION_EVENTS.lock().await;
+        if let Some(event) = events.get_mut(&id) {
+            event.stage = stage;
+        } else {
+            events.insert(
+                id,
+                GenerationEvent {
+                    id,
+                    start_time: Utc::now(),
+                    stage,
+                },
+            );
+        }
+        events.values().cloned().collect::<Vec<_>>()
+    };
+    let _ = EVENTS_SENDER.send(snapshot);
+}
+
+pub async fn remove_generation_event(id: Uuid) {
+    let snapshot = {
+        let mut events = GENERATION_EVENTS.lock().await;
+        events.remove(&id);
+        events.values().cloned().collect::<Vec<_>>()
+    };
+    let _ = EVENTS_SENDER.send(snapshot);
+}
+
 const NEW_WALLPAPER_INTERVAL: Duration = Duration::hours(6);
 
-#[cfg(feature = "server")]
 pub async fn start_server() {
+    // let id = Uuid::new_v4();
+    // tokio::time::sleep(tokio::time::Duration::from_secs(4)).await;
+    // update_generation_event(id, GenerationStage::WaitingForPrompt).await;
+    // tokio::time::sleep(tokio::time::Duration::from_secs(4)).await;
+    // update_generation_event(
+    //     id,
+    //     GenerationStage::ReceivedPrompt {
+    //         prompt: "test".to_string(),
+    //     },
+    // )
+    // .await;
+    // tokio::time::sleep(tokio::time::Duration::from_secs(4)).await;
+    // update_generation_event(id, GenerationStage::ReceivedImage).await;
+    // tokio::time::sleep(tokio::time::Duration::from_secs(4)).await;
+    // remove_generation_event(id).await;
     loop {
         match read_database().await {
             Ok(database) => {
@@ -28,134 +73,16 @@ pub async fn start_server() {
                     .max_by_key(|w| w.datetime)
                     .map_or(cur_time, |w| w.datetime);
 
-                if cur_time - latest_time > NEW_WALLPAPER_INTERVAL
-                    && let Err(e) = generate_wallpaper_impl(None, None).await
-                {
-                    error!("Error generating wallpaper: {e:?}");
+                if cur_time - latest_time > NEW_WALLPAPER_INTERVAL {
+                    let id = Uuid::new_v4();
+                    if let Err(e) = generate_wallpaper_impl(None, None, id).await {
+                        tracing::error!("generate failed: {e:?}");
+                        remove_generation_event(id).await;
+                    }
                 }
             }
             Err(e) => error!("{e:?}"),
         }
         tokio::time::sleep(tokio::time::Duration::from_secs(60 * 10)).await;
     }
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct GalleryPageData {
-    pub items: Vec<WallpaperData>,
-    pub style_prompt: String,
-}
-
-#[server]
-pub async fn load_gallery_data() -> Result<GalleryPageData, ServerFnError> {
-    let db = read_database()
-        .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
-    let mut items: Vec<WallpaperData> = db.wallpapers.values().cloned().collect();
-    items.sort_by(|a, b| b.datetime.cmp(&a.datetime));
-    Ok(GalleryPageData {
-        items,
-        style_prompt: db.style,
-    })
-}
-
-#[server]
-pub async fn action_generate(prompt: Option<String>) -> Result<(), ServerFnError> {
-    let prompt = prompt.filter(|p| !p.trim().is_empty());
-    if let Err(e) = generate_wallpaper_impl(None, prompt).await {
-        tracing::error!("generate failed: {e:?}");
-    }
-    Ok(())
-}
-
-#[server]
-pub async fn action_like(id: Uuid, state: LikedState) -> Result<(), ServerFnError> {
-    info!("LIKED TEST: id={id:?}");
-    with_db(|db| {
-        let Some(wallpaper) = db.wallpapers.get_mut(&id) else {
-            error!("Like: wallpaper not found {id}");
-            return Err(StatusCode::NOT_FOUND);
-        };
-        wallpaper.liked_state = if wallpaper.liked_state == state {
-            LikedState::Neutral
-        } else {
-            state
-        };
-        Ok(())
-    })
-    .await
-    .map_err(|e| ServerFnError::new(format!("like failed: {e:?}")))
-}
-
-#[server]
-pub async fn action_delete(id: Uuid) -> Result<(), ServerFnError> {
-    let files_to_remove = with_db(|db| {
-        db.wallpapers
-            .remove(&id)
-            .map(|w| vec![w.image_file.file_name, w.thumbnail_file.file_name])
-            .ok_or(StatusCode::NOT_FOUND)
-    })
-    .await
-    .map_err(|status| ServerFnError::new(format!("Database error: {status}")))?;
-
-    for file_name in files_to_remove {
-        let file_path = WALLPAPERS_DIR.join(file_name);
-        if file_path.exists() {
-            tokio::fs::remove_file(file_path)
-                .await
-                .map_err(|e| ServerFnError::new(format!("File removal failed: {e}")))?;
-        }
-    }
-
-    Ok(())
-}
-
-#[server]
-pub async fn action_recreate(id: Uuid) -> Result<(), ServerFnError> {
-    let prompt_data = read_database()
-        .await
-        .map_err(|e| {
-            error!("DB read failed: {e:?}");
-            ServerFnError::new("Database read error")
-        })?
-        .wallpapers
-        .get(&id)
-        .map(|w| w.prompt_data.clone())
-        .ok_or_else(|| {
-            error!("Recreate: wallpaper not found {id}");
-            ServerFnError::new("Wallpaper not found")
-        })?;
-
-    generate_wallpaper_impl(Some(prompt_data), None)
-        .await
-        .map_err(|e| {
-            error!("Failed to recreate image: {e:?}");
-            ServerFnError::new("Generation failed")
-        })?;
-
-    Ok(())
-}
-
-#[server]
-pub async fn action_comment(id: Uuid, comment: Option<String>) -> Result<(), ServerFnError> {
-    with_db(|db| {
-        let Some(wallpaper) = db.wallpapers.get_mut(&id) else {
-            error!("set_image_comment: wallpaper not found {id}");
-            return Err(StatusCode::NOT_FOUND);
-        };
-        wallpaper.comment = comment.filter(|s| !s.trim().is_empty());
-        Ok(())
-    })
-    .await
-    .map_err(|e| ServerFnError::new(format!("comment failed: {e:?}")))
-}
-
-#[server]
-pub async fn action_styles(style_prompt: String) -> Result<(), ServerFnError> {
-    with_db(|db| {
-        db.style = style_prompt;
-        Ok(())
-    })
-    .await
-    .map_err(|e| ServerFnError::new(format!("styles failed: {e:?}")))
 }

@@ -1,7 +1,7 @@
 use crate::{
-    common::{ImageFile, LikedState, PromptData, WallpaperData},
+    common::{GenerationStage, ImageFile, LikedState, PromptData, WallpaperData},
     database::{WALLPAPERS_DIR, read_database, write_database},
-    gpt,
+    gpt, routing,
 };
 use anyhow::{Result, anyhow};
 use axum::{
@@ -106,10 +106,12 @@ pub async fn smartget() -> Result<impl IntoResponse, StatusCode> {
 pub async fn generate_wallpaper_impl(
     prompt_data: Option<PromptData>,
     message: Option<String>,
+    id: Uuid,
 ) -> Result<()> {
     info!("Generating wallpaper");
 
-    let id = Uuid::new_v4();
+    routing::update_generation_event(id, GenerationStage::WaitingForPrompt).await;
+
     let datetime = Utc::now();
     let client = &*HTTP_CLIENT;
     let api_token =
@@ -123,8 +125,18 @@ pub async fn generate_wallpaper_impl(
         new
     };
 
+    routing::update_generation_event(
+        id,
+        GenerationStage::ReceivedPrompt {
+            prompt: prompt_data.shortened_prompt.clone(),
+        },
+    )
+    .await;
+
     let (image_url, image) = image_diffusion(client, &api_token, &prompt_data.prompt).await?;
     info!("Generated image: {}", &image_url);
+
+    routing::update_generation_event(id, GenerationStage::ReceivedImage).await;
 
     let datetime_str = datetime.to_rfc3339();
 
@@ -167,6 +179,11 @@ pub async fn generate_wallpaper_impl(
     let mut database = read_database().await?;
     database.wallpapers.insert(id, wallpaper);
     write_database(&database).await?;
+
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        routing::remove_generation_event(id).await;
+    });
 
     Ok(())
 }

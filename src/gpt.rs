@@ -29,7 +29,7 @@ where
     schema_object.remove("$schema");
 
     let payload = json!({
-        "model": env::var("OPENROUTER_MODEL").unwrap_or_else(|_| "openai/gpt-oss-120b".to_string()),
+        "model": env::var("OPENROUTER_MODEL").unwrap_or_else(|_| "deepseek-v4-flash".to_string()),
         "structured_outputs": true,
         "messages": [
             { "role": "system", "content": context.join("\n\n") },
@@ -43,6 +43,9 @@ where
                 "schema": schema_object
             }
         },
+        "reasoning": {
+            "effort": "none"
+        }
     });
 
     let response = HTTP_CLIENT
@@ -88,7 +91,7 @@ pub async fn build_context() -> Result<(String, String, String)> {
     let style_prompt = database.style.clone();
     let wallpapers: Vec<_> = database.wallpapers.into_values().collect();
 
-    // Chronological timeline of wallpapers (with optional per-image comments).
+    // Chronological timeline of wallpapers
     let mut timeline: Vec<(chrono::DateTime<chrono::Utc>, String)> = wallpapers
         .iter()
         .map(|w| {
@@ -100,7 +103,7 @@ pub async fn build_context() -> Result<(String, String, String)> {
             };
             let mut entry = format!("• {}{}", w.prompt_data.shortened_prompt, feedback);
             if let Some(note) = &w.comment {
-                let _ = write!(entry, "\n  note: {note}");
+                let _ = write!(entry, "  user note: {note}");
             }
             (w.datetime, entry)
         })

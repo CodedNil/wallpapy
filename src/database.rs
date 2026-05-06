@@ -17,7 +17,7 @@ pub struct Database {
 impl Default for Database {
     fn default() -> Self {
         Self {
-            style: "Style: Digital paintings, colourful\nContents: Epic fantasy, surreal, abstract, landscapes\nAvoid: No people, don\'t go for highly complex".to_string(),
+            style: "Style: Digital paintings, colourful, looks great as a desktop wallpaper even when heavily blurred behind apps\nContents: Epic fantasy, surreal, abstract, landscapes\nAvoid: No people, don\'t go for highly complex".to_string(),
             wallpapers: HashMap::default(),
         }
     }

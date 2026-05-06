@@ -1,21 +1,46 @@
-use crate::{
-    common::{LikedState, WallpaperData},
-    routing::{
-        action_comment, action_delete, action_generate, action_like, action_recreate,
-        action_styles, load_gallery_data,
-    },
+use crate::common::{GenerationEvent, GenerationStage, LikedState, WallpaperData};
+use crate::server_functions::{
+    action_comment, action_delete, action_generate, action_like, action_recreate, action_styles,
+    load_gallery_data, stream_generation_events,
 };
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 use dioxus_free_icons::{Icon, IconShape, icons::fa_solid_icons};
+use std::collections::HashSet;
 
 const NEUTRAL_COLOR: &str = "10, 10, 10";
 const LOVED_COLOR: &str = "160, 100, 10";
 const LIKED_COLOR: &str = "20, 80, 30";
 const DISLIKED_COLOR: &str = "90, 15, 15";
-
 const OVERLAY_OPACITY: &str = "0.7";
 const OVERLAY_TEXT_COLOR: &str = "rgba(255, 255, 255, 0.9)";
+
+const fn like_color(state: LikedState) -> Option<&'static str> {
+    match state {
+        LikedState::Loved => Some(LOVED_COLOR),
+        LikedState::Liked => Some(LIKED_COLOR),
+        LikedState::Disliked => Some(DISLIKED_COLOR),
+        LikedState::Neutral => None,
+    }
+}
+
+fn format_age(dt: DateTime<Utc>) -> String {
+    let diff = Utc::now().signed_duration_since(dt);
+    if diff.num_weeks() >= 1 || diff.num_milliseconds() < 0 {
+        dt.format("%d/%m/%Y %I%P").to_string()
+    } else if diff.num_days() >= 1 {
+        let n = diff.num_days();
+        format!("{n} day{} ago", if n == 1 { "" } else { "s" })
+    } else if diff.num_hours() >= 1 {
+        let n = diff.num_hours();
+        format!("{n} hour{} ago", if n == 1 { "" } else { "s" })
+    } else if diff.num_minutes() >= 1 {
+        let n = diff.num_minutes();
+        format!("{n} minute{} ago", if n == 1 { "" } else { "s" })
+    } else {
+        "just now".to_string()
+    }
+}
 
 pub fn app() -> Element {
     let mut fullscreen_id = use_context_provider(|| Signal::new(None::<uuid::Uuid>));
@@ -70,24 +95,14 @@ pub fn app() -> Element {
 
 #[component]
 fn GalleryPage() -> Element {
-    let mut generate_action = use_action(action_generate);
     let mut styles_action = use_action(action_styles);
-    let mut generate_prompt = use_signal(String::new);
-    let mut btn_hovered = use_signal(|| false);
-    let mut btn_pressed = use_signal(|| false);
-    let mut prompt_active = use_signal(|| false);
-    let data = use_server_future(load_gallery_data)?;
+    let mut data = use_server_future(load_gallery_data)?;
 
-    let (items, style_val) = match data() {
-        Some(Ok(d)) => (d.items, d.style_prompt),
-        _ => {
-            return rsx! {
-                p { "Error loading gallery." }
-            };
-        }
+    let Some(Ok(gallery)) = data() else {
+        return rsx! {
+            p { "Loading..." }
+        };
     };
-
-    let prompt_expanded = prompt_active() || !generate_prompt().is_empty();
 
     rsx! {
         div {
@@ -100,51 +115,11 @@ fn GalleryPage() -> Element {
             top: "0",
             z_index: "100",
             align_items: "center",
-            div { display: "flex",
-                button {
-                    padding: "6px 14px",
-                    border_radius: "8px 0 0 8px",
-                    border: "none",
-                    color: "white",
-                    cursor: "pointer",
-                    font_size: "13px",
-                    font_weight: "bolder",
-                    background: format!("rgba(80, 140, 90)"),
-                    filter: if btn_hovered() { "brightness(1.5)" } else { "brightness(1)" },
-                    transform: if btn_pressed() { "scale(0.97)" } else { "scale(1)" },
-                    transition: "filter 0.15s ease, transform 0.1s ease",
-                    onmouseenter: move |_| btn_hovered.set(true),
-                    onmouseleave: move |_| {
-                        btn_hovered.set(false);
-                        btn_pressed.set(false);
-                    },
-                    onmousedown: move |_| btn_pressed.set(true),
-                    onmouseup: move |_| btn_pressed.set(false),
-                    onclick: move |_| {
-                        let p = generate_prompt();
-                        generate_action.call(if p.trim().is_empty() { None } else { Some(p) });
-                        generate_prompt.set(String::new());
-                    },
-                    "Generate"
-                }
-                input {
-                    style: format!(
-                        "width: {}; border-radius: 0 8px 8px 0; background: rgba(100, 160, 110); border: none; outline: none; color: white; font-size: 13px; padding: 6px {}; transition: width 0.25s ease, padding 0.25s ease; text-align: left;",
-                        if prompt_expanded { "160px" } else { "30px" },
-                        if prompt_expanded { "10px" } else { "6px" },
-                    ),
-                    placeholder: if prompt_expanded { "Custom prompt..." } else { "✨" },
-                    value: generate_prompt(),
-                    oninput: move |e| generate_prompt.set(e.value()),
-                    onmouseenter: move |_| prompt_active.set(true),
-                    onmouseleave: move |_| prompt_active.set(false),
-                    onfocus: move |_| prompt_active.set(true),
-                    onblur: move |_| prompt_active.set(false),
-                }
-            }
+            GenerateButton {}
+            EventsPanel { on_image_received: move || data.restart() }
         }
         GhostInput {
-            value: style_val,
+            value: gallery.style_prompt,
             placeholder: "Style prompt...",
             oninput: move |val| styles_action.call(val),
         }
@@ -153,7 +128,7 @@ fn GalleryPage() -> Element {
             grid_template_columns: "repeat(auto-fill, minmax(360px, 1fr))",
             gap: "20px",
             padding: "20px",
-            for w in items {
+            for w in gallery.items {
                 WallpaperCard { key: "{w.id}", w }
             }
         }
@@ -161,44 +136,158 @@ fn GalleryPage() -> Element {
 }
 
 #[component]
-fn WallpaperCard(w: WallpaperData) -> Element {
-    let diff = Utc::now().signed_duration_since(w.datetime);
-    let date = if diff.num_weeks() >= 1 || diff.num_milliseconds() < 0 {
-        w.datetime.format("%d/%m/%Y %I%P").to_string()
-    } else if diff.num_days() >= 1 {
-        let n = diff.num_days();
-        format!("{n} day{} ago", if n == 1 { "" } else { "s" })
-    } else if diff.num_hours() >= 1 {
-        let n = diff.num_hours();
-        format!("{n} hour{} ago", if n == 1 { "" } else { "s" })
-    } else if diff.num_minutes() >= 1 {
-        let n = diff.num_minutes();
-        format!("{n} minute{} ago", if n == 1 { "" } else { "s" })
-    } else {
-        "just now".to_string()
+fn GenerateButton() -> Element {
+    let mut action = use_action(action_generate);
+    let mut prompt = use_signal(String::new);
+    let mut hovered = use_signal(|| false);
+    let mut pressed = use_signal(|| false);
+    let mut input_active = use_signal(|| false);
+    let expanded = input_active() || !prompt().is_empty();
+
+    rsx! {
+        div { display: "flex",
+            button {
+                padding: "6px 14px",
+                border_radius: "8px 0 0 8px",
+                border: "none",
+                color: "white",
+                cursor: "pointer",
+                font_size: "13px",
+                font_weight: "bolder",
+                background: "rgba(80, 140, 90)",
+                filter: if hovered() { "brightness(1.5)" } else { "brightness(1)" },
+                transform: if pressed() { "scale(0.97)" } else { "scale(1)" },
+                transition: "filter 0.15s ease, transform 0.1s ease",
+                onmouseenter: move |_| hovered.set(true),
+                onmouseleave: move |_| {
+                    hovered.set(false);
+                    pressed.set(false);
+                },
+                onmousedown: move |_| pressed.set(true),
+                onmouseup: move |_| pressed.set(false),
+                onclick: move |_| {
+                    let p = prompt();
+                    action.call(if p.trim().is_empty() { None } else { Some(p) });
+                    prompt.set(String::new());
+                },
+                "Generate"
+            }
+            input {
+                style: format!(
+                    "width: {}; border-radius: 0 8px 8px 0; background: rgba(100, 160, 110); border: none; outline: none; color: white; font-size: 13px; padding: 6px {}; transition: width 0.25s ease, padding 0.25s ease; text-align: left;",
+                    if expanded { "160px" } else { "30px" },
+                    if expanded { "10px" } else { "6px" },
+                ),
+                placeholder: if expanded { "Custom prompt..." } else { "✨" },
+                value: prompt(),
+                oninput: move |e| prompt.set(e.value()),
+                onmouseenter: move |_| input_active.set(true),
+                onmouseleave: move |_| input_active.set(false),
+                onfocus: move |_| input_active.set(true),
+                onblur: move |_| input_active.set(false),
+            }
+        }
+    }
+}
+
+#[component]
+fn EventsPanel(on_image_received: EventHandler<()>) -> Element {
+    let mut cached_events: Signal<Vec<GenerationEvent>> = use_signal(Vec::new);
+
+    use_future(move || async move {
+        let Ok(mut stream) = stream_generation_events().await else {
+            return;
+        };
+        let mut handled: HashSet<uuid::Uuid> = HashSet::new();
+        while let Some(Ok(snapshot)) = stream.recv().await {
+            for event in &snapshot {
+                if event.stage == GenerationStage::ReceivedImage && handled.insert(event.id) {
+                    on_image_received.call(());
+                }
+            }
+            handled.retain(|id| snapshot.iter().any(|e| e.id == *id));
+            cached_events.set(snapshot);
+        }
+    });
+
+    rsx! {
+        div {
+            display: "flex",
+            gap: "10px",
+            margin_left: "20px",
+            overflow_x: "auto",
+            for event in cached_events() {
+                GenerationEventView { key: "{event.id}", event }
+            }
+        }
+    }
+}
+
+#[component]
+fn GenerationEventView(event: GenerationEvent) -> Element {
+    let mut tick = use_signal(|| 0u32);
+    use_future(move || async move {
+        loop {
+            gloo_timers::future::TimeoutFuture::new(1000).await;
+            *tick.write() += 1;
+        }
+    });
+
+    let _ = tick();
+    let elapsed = Utc::now()
+        .signed_duration_since(event.start_time)
+        .num_seconds();
+    let text = match &event.stage {
+        GenerationStage::WaitingForPrompt => {
+            format!("Generating image started {elapsed}s ago, creating prompt...")
+        }
+        GenerationStage::ReceivedPrompt { prompt } => {
+            format!("Generating image started {elapsed}s ago, prompt: \"{prompt}\"")
+        }
+        GenerationStage::ReceivedImage => "Image received! Refreshing gallery...".to_string(),
     };
 
+    rsx! {
+        div {
+            padding: "4px 10px",
+            background: "rgba(255, 255, 255, 0.1)",
+            border_radius: "6px",
+            font_size: "12px",
+            color: "#ccc",
+            white_space: "nowrap",
+            "{text}"
+        }
+    }
+}
+
+#[component]
+fn WallpaperCard(w: WallpaperData) -> Element {
     let mut like_action = use_action(action_like);
     let mut recreate_action = use_action(action_recreate);
     let mut delete_action = use_action(action_delete);
     let mut comment_action = use_action(action_comment);
 
-    let mut liked_signal = use_signal(|| w.liked_state);
+    let mut deleted = use_signal(|| false);
+    let mut liked = use_signal(|| w.liked_state);
+    let mut comment = use_signal(|| w.comment.clone().unwrap_or_default());
+    let mut hovered = use_signal(|| false);
+    let mut fullscreen_id = use_context::<Signal<Option<uuid::Uuid>>>();
+
+    let is_fullscreen = fullscreen_id() == Some(w.id);
+
     let mut update_like = move |target: LikedState| {
-        let new_state = if liked_signal() == target {
+        let new_state = if liked() == target {
             LikedState::Neutral
         } else {
             target
         };
-        liked_signal.set(new_state);
+        liked.set(new_state);
         like_action.call(w.id, new_state);
     };
 
-    let mut comment_signal = use_signal(|| w.comment.clone().unwrap_or_default());
-    let mut hovered = use_signal(|| false);
-
-    let mut fullscreen_id = use_context::<Signal<Option<uuid::Uuid>>>();
-    let is_fullscreen = fullscreen_id() == Some(w.id);
+    if deleted() {
+        return rsx! {};
+    }
 
     rsx! {
         div {
@@ -217,13 +306,7 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                 aspect_ratio: "16 / 9",
                 overflow: "hidden",
                 cursor: "pointer",
-                onclick: move |_| {
-                    if is_fullscreen {
-                        fullscreen_id.set(None);
-                    } else {
-                        fullscreen_id.set(Some(w.id));
-                    }
-                },
+                onclick: move |_| fullscreen_id.set((!is_fullscreen).then_some(w.id)),
                 onmouseenter: move |_| hovered.set(true),
                 onmouseleave: move |_| hovered.set(false),
 
@@ -257,14 +340,14 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                         justify_content: "space-between",
                         align_items: "start",
 
-                        Pill { text: date }
+                        Pill { text: format_age(w.datetime) }
 
                         div {
                             display: "flex",
                             gap: "4px",
                             pointer_events: "auto",
                             IconButton {
-                                color: (liked_signal() == LikedState::Loved).then_some(LOVED_COLOR),
+                                color: like_color(liked()).filter(|_| liked() == LikedState::Loved),
                                 icon: fa_solid_icons::FaHeart,
                                 onclick: move |e: MouseEvent| {
                                     e.stop_propagation();
@@ -272,7 +355,7 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                                 },
                             }
                             IconButton {
-                                color: (liked_signal() == LikedState::Liked).then_some(LIKED_COLOR),
+                                color: like_color(liked()).filter(|_| liked() == LikedState::Liked),
                                 icon: fa_solid_icons::FaThumbsUp,
                                 onclick: move |e: MouseEvent| {
                                     e.stop_propagation();
@@ -280,7 +363,7 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                                 },
                             }
                             IconButton {
-                                color: (liked_signal() == LikedState::Disliked).then_some(DISLIKED_COLOR),
+                                color: like_color(liked()).filter(|_| liked() == LikedState::Disliked),
                                 icon: fa_solid_icons::FaThumbsDown,
                                 onclick: move |e: MouseEvent| {
                                     e.stop_propagation();
@@ -298,6 +381,7 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                                 icon: fa_solid_icons::FaTrash,
                                 onclick: move |e: MouseEvent| {
                                     e.stop_propagation();
+                                    deleted.set(true);
                                     delete_action.call(w.id);
                                 },
                             }
@@ -306,12 +390,7 @@ fn WallpaperCard(w: WallpaperData) -> Element {
 
                     div { display: "flex", justify_content: "flex-start",
                         Pill {
-                            color: match liked_signal() {
-                                LikedState::Loved => Some(LOVED_COLOR),
-                                LikedState::Liked => Some(LIKED_COLOR),
-                                LikedState::Disliked => Some(DISLIKED_COLOR),
-                                LikedState::Neutral => None,
-                            },
+                            color: like_color(liked()),
                             text: w.prompt_data.shortened_prompt,
                         }
                     }
@@ -319,14 +398,14 @@ fn WallpaperCard(w: WallpaperData) -> Element {
             }
 
             GhostInput {
-                value: comment_signal(),
+                value: comment(),
                 placeholder: "Add a note...",
                 single_line: true,
                 maxlength: 54,
                 oninput: move |val: String| {
-                    let comment = (!val.trim().is_empty()).then(|| val.clone());
-                    comment_signal.set(val);
-                    comment_action.call(w.id, comment);
+                    let saved = (!val.trim().is_empty()).then(|| val.clone());
+                    comment.set(val);
+                    comment_action.call(w.id, saved);
                 },
             }
         }
@@ -361,8 +440,7 @@ fn GhostInput(
             onfocus: move |_| focused.set(true),
             onblur: move |_| focused.set(false),
             oninput: move |e| {
-                let val = if single_line { e.value().replace('\n', "") } else { e.value() };
-                oninput.call(val);
+                oninput.call(if single_line { e.value().replace('\n', "") } else { e.value() })
             },
             value,
         }
@@ -393,8 +471,7 @@ fn IconButton<T: IconShape + Clone + PartialEq + 'static>(
 ) -> Element {
     let mut hovered = use_signal(|| false);
     let mut pressed = use_signal(|| false);
-
-    rsx!(
+    rsx! {
         button {
             width: "26px",
             height: "26px",
@@ -426,5 +503,5 @@ fn IconButton<T: IconShape + Clone + PartialEq + 'static>(
                 icon,
             }
         }
-    )
+    }
 }

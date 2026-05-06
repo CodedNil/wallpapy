@@ -42,3 +42,17 @@ pub enum LikedState {
     Neutral,
     Disliked,
 }
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum GenerationStage {
+    WaitingForPrompt,
+    ReceivedPrompt { prompt: String },
+    ReceivedImage,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct GenerationEvent {
+    pub id: Uuid,
+    pub start_time: DateTime<Utc>,
+    pub stage: GenerationStage,
+}

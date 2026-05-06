@@ -1,5 +1,5 @@
 mod common;
-mod routing;
+mod server_functions;
 mod web;
 
 #[cfg(feature = "server")]
@@ -8,6 +8,8 @@ mod database;
 mod gpt;
 #[cfg(feature = "server")]
 mod image;
+#[cfg(feature = "server")]
+mod routing;
 
 fn main() {
     #[cfg(feature = "web")]

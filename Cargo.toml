@@ -14,6 +14,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 uuid = { version = "1.23.1", features = ["v4", "fast-rng", "serde", "js"] }
 chrono = { version = "0.4.44", features = ["serde"] }
 schemars = "1.2.1"
+gloo-timers = { version = "0.4.0", features = ["futures"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 dotenvy = "0.15.7"
