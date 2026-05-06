@@ -29,7 +29,13 @@ static DATABASE_FILE: LazyLock<PathBuf> = LazyLock::new(|| DATA_DIR.join("databa
 
 pub async fn read_database() -> Result<Database> {
     match fs::read_to_string(&*DATABASE_FILE).await {
-        Ok(data) => Ok(ron::from_str(&data)?),
+        Ok(data) => match ron::from_str(&data) {
+            Ok(db) => Ok(db),
+            Err(e) => {
+                error!("Failed to parse database RON: {e}");
+                Err(e.into())
+            }
+        },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Database::default()),
         Err(e) => Err(e.into()),
     }

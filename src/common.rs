@@ -44,6 +44,7 @@ pub enum GenerationStage {
     WaitingForPrompt,
     ReceivedPrompt { prompt: String },
     ReceivedImage,
+    Failed { reason: String },
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]

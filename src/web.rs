@@ -316,6 +316,9 @@ fn GenerationEventView(event: GenerationEvent) -> Element {
             format!("Generating image started {elapsed}s ago, prompt: \"{prompt}\"")
         }
         GenerationStage::ReceivedImage => "Image received! Refreshing gallery...".to_string(),
+        GenerationStage::Failed { reason } => {
+            format!("Failed: {reason}")
+        }
     };
 
     rsx! {

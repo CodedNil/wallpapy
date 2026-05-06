@@ -4,8 +4,10 @@ use crate::{
     image::generate_wallpaper_impl,
 };
 use chrono::{Duration, Utc};
-use std::collections::HashMap;
-use std::sync::{Arc, LazyLock};
+use std::{
+    collections::HashMap,
+    sync::{Arc, LazyLock},
+};
 use tokio::sync::{Mutex, broadcast};
 use tracing::error;
 use uuid::Uuid;

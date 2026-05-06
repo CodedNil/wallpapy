@@ -1,14 +1,17 @@
-use crate::common::{GenerationEvent, LikedState, WallpaperData};
+use crate::common::{
+    LikedState, WallpaperData, {GenerationEvent, GenerationStage},
+};
 use dioxus::fullstack::payloads::ServerEvents;
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use uuid::Uuid;
 
 #[cfg(feature = "server")]
 use crate::{
     database::{WALLPAPERS_DIR, read_database, with_db},
     image::generate_wallpaper_impl,
-    routing::{EVENTS_SENDER, GENERATION_EVENTS, remove_generation_event},
+    routing::{EVENTS_SENDER, GENERATION_EVENTS, remove_generation_event, update_generation_event},
 };
 #[cfg(feature = "server")]
 use axum::http::StatusCode;
@@ -63,7 +66,15 @@ pub async fn action_generate(prompt: Option<String>) -> Result<(), ServerFnError
     let prompt = prompt.filter(|p| !p.trim().is_empty());
     let id = Uuid::new_v4();
     if let Err(e) = generate_wallpaper_impl(None, prompt, id).await {
-        tracing::error!("generate failed: {e:?}");
+        update_generation_event(
+            id,
+            GenerationStage::Failed {
+                reason: e.to_string(),
+            },
+        )
+        .await;
+
+        tokio::time::sleep(Duration::from_secs(5)).await;
         remove_generation_event(id).await;
     }
     Ok(())
@@ -73,7 +84,6 @@ pub async fn action_generate(prompt: Option<String>) -> Result<(), ServerFnError
 pub async fn action_like(id: Uuid, state: LikedState) -> Result<(), ServerFnError> {
     with_db(|db| {
         let Some(wallpaper) = db.wallpapers.get_mut(&id) else {
-            tracing::error!("Like: wallpaper not found {id}");
             return Err(StatusCode::NOT_FOUND);
         };
         wallpaper.liked_state = if wallpaper.liked_state == state {

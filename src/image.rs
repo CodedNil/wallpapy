@@ -159,8 +159,6 @@ pub async fn generate_wallpaper_impl(
     let (image_url, image) = image_diffusion(client, &api_token, &prompt_data.prompt).await?;
     info!("Generated image: {}", &image_url);
 
-    routing::update_generation_event(id, GenerationStage::ReceivedImage).await;
-
     let datetime_str = datetime.to_rfc3339();
 
     let file_name = format!("{datetime_str}.avif");
@@ -185,11 +183,10 @@ pub async fn generate_wallpaper_impl(
     let mut database = read_database().await?;
     database.wallpapers.insert(id, wallpaper);
     write_database(&database).await?;
+    routing::update_generation_event(id, GenerationStage::ReceivedImage).await;
 
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(5)).await;
-        routing::remove_generation_event(id).await;
-    });
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    routing::remove_generation_event(id).await;
 
     Ok(())
 }
