@@ -2,7 +2,6 @@ use crate::common::{GenerationEvent, LikedState, WallpaperData};
 use dioxus::fullstack::payloads::ServerEvents;
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
-use tracing::error;
 use uuid::Uuid;
 
 #[cfg(feature = "server")]
@@ -64,7 +63,7 @@ pub async fn action_generate(prompt: Option<String>) -> Result<(), ServerFnError
     let prompt = prompt.filter(|p| !p.trim().is_empty());
     let id = Uuid::new_v4();
     if let Err(e) = generate_wallpaper_impl(None, prompt, id).await {
-        error!("generate failed: {e:?}");
+        tracing::error!("generate failed: {e:?}");
         remove_generation_event(id).await;
     }
     Ok(())
@@ -74,7 +73,7 @@ pub async fn action_generate(prompt: Option<String>) -> Result<(), ServerFnError
 pub async fn action_like(id: Uuid, state: LikedState) -> Result<(), ServerFnError> {
     with_db(|db| {
         let Some(wallpaper) = db.wallpapers.get_mut(&id) else {
-            error!("Like: wallpaper not found {id}");
+            tracing::error!("Like: wallpaper not found {id}");
             return Err(StatusCode::NOT_FOUND);
         };
         wallpaper.liked_state = if wallpaper.liked_state == state {
@@ -113,20 +112,20 @@ pub async fn action_recreate(id: Uuid) -> Result<(), ServerFnError> {
     let prompt_data = read_database()
         .await
         .map_err(|e| {
-            error!("DB read failed: {e:?}");
+            tracing::error!("DB read failed: {e:?}");
             ServerFnError::new("Database read error")
         })?
         .wallpapers
         .get(&id)
         .map(|w| w.prompt_data.clone())
         .ok_or_else(|| {
-            error!("Recreate: wallpaper not found {id}");
+            tracing::error!("Recreate: wallpaper not found {id}");
             ServerFnError::new("Wallpaper not found")
         })?;
 
     let id = Uuid::new_v4();
     if let Err(e) = generate_wallpaper_impl(Some(prompt_data), None, id).await {
-        error!("Failed to recreate image: {e:?}");
+        tracing::error!("Failed to recreate image: {e:?}");
         remove_generation_event(id).await;
     }
     Ok(())
@@ -136,7 +135,7 @@ pub async fn action_recreate(id: Uuid) -> Result<(), ServerFnError> {
 pub async fn action_comment(id: Uuid, comment: Option<String>) -> Result<(), ServerFnError> {
     with_db(|db| {
         let Some(wallpaper) = db.wallpapers.get_mut(&id) else {
-            error!("set_image_comment: wallpaper not found {id}");
+            tracing::error!("set_image_comment: wallpaper not found {id}");
             return Err(StatusCode::NOT_FOUND);
         };
         wallpaper.comment = comment.filter(|s| !s.trim().is_empty());

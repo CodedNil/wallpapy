@@ -9,6 +9,7 @@ pkgs.mkShell {
     clippy
     dioxus-cli
     lld
+    binaryen
   ];
   RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
 }

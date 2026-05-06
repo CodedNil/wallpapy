@@ -1,10 +1,10 @@
 [package]
 name = "wallpapy"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 
 [dependencies]
-dioxus = { version = "=0.7.5", features = ["fullstack"] }
+dioxus = { version = "0.7.7", features = ["fullstack"] }
 dioxus-free-icons = { version = "0.10.0", features = ["font-awesome-solid"] }
 
 tracing = "0.1.44"
