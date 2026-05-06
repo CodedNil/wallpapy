@@ -48,21 +48,6 @@ pub async fn remove_generation_event(id: Uuid) {
 const NEW_WALLPAPER_INTERVAL: Duration = Duration::hours(6);
 
 pub async fn start_server() {
-    // let id = Uuid::new_v4();
-    // tokio::time::sleep(tokio::time::Duration::from_secs(4)).await;
-    // update_generation_event(id, GenerationStage::WaitingForPrompt).await;
-    // tokio::time::sleep(tokio::time::Duration::from_secs(4)).await;
-    // update_generation_event(
-    //     id,
-    //     GenerationStage::ReceivedPrompt {
-    //         prompt: "test".to_string(),
-    //     },
-    // )
-    // .await;
-    // tokio::time::sleep(tokio::time::Duration::from_secs(4)).await;
-    // update_generation_event(id, GenerationStage::ReceivedImage).await;
-    // tokio::time::sleep(tokio::time::Duration::from_secs(4)).await;
-    // remove_generation_event(id).await;
     loop {
         match read_database().await {
             Ok(database) => {

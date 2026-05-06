@@ -2,7 +2,7 @@ use crate::common::{GenerationEvent, LikedState, WallpaperData};
 use dioxus::fullstack::payloads::ServerEvents;
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
-use tracing::{error, info};
+use tracing::error;
 use uuid::Uuid;
 
 #[cfg(feature = "server")]
@@ -72,7 +72,6 @@ pub async fn action_generate(prompt: Option<String>) -> Result<(), ServerFnError
 
 #[post("/api/wallpapers/{id}/like")]
 pub async fn action_like(id: Uuid, state: LikedState) -> Result<(), ServerFnError> {
-    info!("LIKED TEST: id={id:?}");
     with_db(|db| {
         let Some(wallpaper) = db.wallpapers.get_mut(&id) else {
             error!("Like: wallpaper not found {id}");

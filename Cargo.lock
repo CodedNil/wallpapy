@@ -3562,6 +3562,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "tap"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4074,12 +4080,12 @@ dependencies = [
  "gloo-timers 0.4.0",
  "image",
  "mime_guess",
- "rand 0.10.1",
  "reqwest 0.13.3",
  "ron",
  "schemars",
  "serde",
  "serde_json",
+ "tap",
  "tokio",
  "tower-http",
  "tracing",

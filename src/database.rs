@@ -1,3 +1,4 @@
+use crate::common::WallpaperData;
 use anyhow::Result;
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -5,8 +6,6 @@ use std::{collections::HashMap, env, path::PathBuf, sync::LazyLock};
 use tokio::fs;
 use tracing::error;
 use uuid::Uuid;
-
-use crate::common::WallpaperData;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Database {

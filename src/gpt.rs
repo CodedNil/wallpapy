@@ -1,6 +1,6 @@
 use crate::{
     common::{LikedState, PromptData},
-    database::read_database,
+    database::{Database, read_database},
 };
 use anyhow::{Result, anyhow};
 use reqwest::{
@@ -11,6 +11,7 @@ use schemars::{JsonSchema, SchemaGenerator, generate::SchemaSettings};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use std::{env, error::Error, fmt::Write as _, sync::LazyLock};
+use tap::Tap;
 use tracing::error;
 
 static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
@@ -22,11 +23,13 @@ async fn llm_parse<T>(
 where
     T: JsonSchema + DeserializeOwned,
 {
-    let mut schema_object = SchemaGenerator::new(SchemaSettings::openapi3().with(|s| {
+    let schema_object = SchemaGenerator::new(SchemaSettings::openapi3().with(|s| {
         s.inline_subschemas = true;
     }))
-    .into_root_schema_for::<T>();
-    schema_object.remove("$schema");
+    .into_root_schema_for::<T>()
+    .tap_mut(|s| {
+        s.remove("$schema");
+    });
 
     let payload = json!({
         "model": env::var("OPENROUTER_MODEL").unwrap_or_else(|_| "deepseek-v4-flash".to_string()),
@@ -88,11 +91,13 @@ pub async fn build_context() -> Result<(String, String, String)> {
         .inspect_err(|e| error!("Failed accessing database {e:?}"))
         .unwrap_or_default();
 
-    let style_prompt = database.style.clone();
-    let wallpapers: Vec<_> = database.wallpapers.into_values().collect();
+    let Database {
+        style: style_prompt,
+        wallpapers,
+    } = database;
+    let wallpapers: Vec<_> = wallpapers.into_values().collect();
 
-    // Chronological timeline of wallpapers
-    let mut timeline: Vec<(chrono::DateTime<chrono::Utc>, String)> = wallpapers
+    let timeline: Vec<(chrono::DateTime<chrono::Utc>, String)> = wallpapers
         .iter()
         .map(|w| {
             let feedback = match w.liked_state {
@@ -107,8 +112,8 @@ pub async fn build_context() -> Result<(String, String, String)> {
             }
             (w.datetime, entry)
         })
-        .collect();
-    timeline.sort_by_key(|(dt, _)| *dt);
+        .collect::<Vec<_>>()
+        .tap_mut(|t| t.sort_by_key(|(dt, _)| *dt));
 
     let recent: String = timeline
         .iter()
@@ -118,7 +123,7 @@ pub async fn build_context() -> Result<(String, String, String)> {
         .collect::<Vec<_>>()
         .join("\n");
 
-    let mut liked: Vec<String> = wallpapers
+    let liked: Vec<String> = wallpapers
         .iter()
         .filter(|w| matches!(w.liked_state, LikedState::Loved | LikedState::Liked))
         .map(|w| {
@@ -129,8 +134,8 @@ pub async fn build_context() -> Result<(String, String, String)> {
             };
             format!("• {} [{label}]", w.prompt_data.shortened_prompt)
         })
-        .collect();
-    liked.sort_unstable();
+        .collect::<Vec<_>>()
+        .tap_mut(|v| v.sort_unstable());
 
     Ok((recent, liked.join("\n"), style_prompt))
 }

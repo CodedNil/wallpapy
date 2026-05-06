@@ -1,6 +1,5 @@
 Implement auth https://dioxuslabs.com/learn/0.7/essentials/fullstack/authentication
 Reimplement filters in current gallery, including a filter for smartget which would return potential candidates
-Notification pings tracking current generations etc
 clean fullscreen with animation and scroll to
 background image should be blurred
 custom font

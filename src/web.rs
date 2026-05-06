@@ -26,17 +26,15 @@ const fn like_color(state: LikedState) -> Option<&'static str> {
 
 fn format_age(dt: DateTime<Utc>) -> String {
     let diff = Utc::now().signed_duration_since(dt);
+    let plural = |n: i64, unit: &str| format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" });
     if diff.num_weeks() >= 1 || diff.num_milliseconds() < 0 {
         dt.format("%d/%m/%Y %I%P").to_string()
     } else if diff.num_days() >= 1 {
-        let n = diff.num_days();
-        format!("{n} day{} ago", if n == 1 { "" } else { "s" })
+        plural(diff.num_days(), "day")
     } else if diff.num_hours() >= 1 {
-        let n = diff.num_hours();
-        format!("{n} hour{} ago", if n == 1 { "" } else { "s" })
+        plural(diff.num_hours(), "hour")
     } else if diff.num_minutes() >= 1 {
-        let n = diff.num_minutes();
-        format!("{n} minute{} ago", if n == 1 { "" } else { "s" })
+        plural(diff.num_minutes(), "minute")
     } else {
         "just now".to_string()
     }
@@ -440,7 +438,7 @@ fn GhostInput(
             onfocus: move |_| focused.set(true),
             onblur: move |_| focused.set(false),
             oninput: move |e| {
-                oninput.call(if single_line { e.value().replace('\n', "") } else { e.value() })
+                oninput.call(if single_line { e.value().replace('\n', "") } else { e.value() });
             },
             value,
         }
