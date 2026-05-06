@@ -15,6 +15,41 @@ const DISLIKED_COLOR: &str = "90, 15, 15";
 const OVERLAY_OPACITY: &str = "0.7";
 const OVERLAY_TEXT_COLOR: &str = "rgba(255, 255, 255, 0.9)";
 
+const FS_ANIM_MS: u32 = 450;
+const FS_ANIM_CURVE: &str = "cubic-bezier(0.33, 1, 0.68, 1)";
+
+#[derive(Clone, PartialEq)]
+struct CardRect {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+#[derive(Clone, PartialEq)]
+struct FullscreenEntry {
+    wallpaper: WallpaperData,
+    rect: CardRect,
+}
+
+#[derive(Clone, PartialEq, Default)]
+enum FullscreenState {
+    #[default]
+    Hidden,
+    Snapped(FullscreenEntry),
+    Open(FullscreenEntry),
+    Closing(FullscreenEntry),
+}
+
+impl FullscreenState {
+    const fn entry(&self) -> Option<&FullscreenEntry> {
+        match self {
+            Self::Hidden => None,
+            Self::Snapped(e) | Self::Open(e) | Self::Closing(e) => Some(e),
+        }
+    }
+}
+
 const fn like_color(state: LikedState) -> Option<&'static str> {
     match state {
         LikedState::Loved => Some(LOVED_COLOR),
@@ -41,7 +76,21 @@ fn format_age(dt: DateTime<Utc>) -> String {
 }
 
 pub fn app() -> Element {
-    let mut fullscreen_id = use_context_provider(|| Signal::new(None::<uuid::Uuid>));
+    let mut fs = use_context_provider(|| Signal::new(FullscreenState::default()));
+
+    let mut close_fs = move || {
+        let current = fs();
+        if let Some(entry) = current.entry() {
+            let entry = entry.clone();
+            fs.set(FullscreenState::Closing(entry));
+            spawn(async move {
+                gloo_timers::future::TimeoutFuture::new(FS_ANIM_MS).await;
+                if matches!(fs(), FullscreenState::Closing(_)) {
+                    fs.set(FullscreenState::Hidden);
+                }
+            });
+        }
+    };
 
     rsx! {
         document::Title { "Wallpapy" }
@@ -85,18 +134,19 @@ pub fn app() -> Element {
             height: "100%",
             object_fit: "cover",
             z_index: "-1",
-            filter: "blur(4px) brightness(0.8)",
+            filter: "blur(40px) brightness(0.8)",
             transform: "scale(1.02)",
         }
         div {
             tabindex: "0",
             onkeydown: move |e| {
                 if e.key() == Key::Escape {
-                    fullscreen_id.set(None);
+                    close_fs();
                 }
             },
             GalleryPage {}
         }
+        FullscreenOverlay {}
     }
 }
 
@@ -113,30 +163,50 @@ fn GalleryPage() -> Element {
 
     rsx! {
         div {
-            display: "flex",
-            gap: "8px",
-            padding: "8px 12px",
-            background: "rgba(20, 20, 32, 0.8)",
-            backdrop_filter: "blur(10px)",
-            position: "sticky",
-            top: "0",
-            z_index: "100",
-            align_items: "center",
-            GenerateButton {}
-            EventsPanel { on_image_received: move || data.restart() }
-        }
-        GhostInput {
-            value: gallery.style_prompt,
-            placeholder: "Style prompt...",
-            oninput: move |val| styles_action.call(val),
-        }
-        div {
             display: "grid",
             grid_template_columns: "repeat(auto-fill, minmax(360px, 1fr))",
             gap: "20px",
             padding: "20px",
             for w in gallery.items {
                 WallpaperCard { key: "{w.id}", w }
+            }
+        }
+
+        div {
+            position: "fixed",
+            bottom: "20px",
+            right: "20px",
+            z_index: "100",
+            display: "flex",
+            flex_direction: "column",
+            align_items: "flex-end",
+            gap: "10px",
+
+            EventsPanel { on_image_received: move || data.restart() }
+
+            div {
+                display: "flex",
+                gap: "16px",
+                padding: "12px",
+                background: "rgba(255, 255, 255, 0.2)",
+                backdrop_filter: "blur(20px)",
+                border_radius: "16px",
+                border: "1px solid rgba(255, 255, 255, 0.3)",
+                align_items: "stretch",
+                box_shadow: "0 8px 32px rgba(0, 0, 0, 0.3)",
+
+                div {
+                    display: "flex",
+                    width: "400px",
+                    border_radius: "16px",
+                    overflow: "hidden",
+                    GhostInput {
+                        value: gallery.style_prompt,
+                        placeholder: "Style prompt...",
+                        oninput: move |val| styles_action.call(val),
+                    }
+                }
+                GenerateButton {}
             }
         }
     }
@@ -148,50 +218,44 @@ fn GenerateButton() -> Element {
     let mut prompt = use_signal(String::new);
     let mut hovered = use_signal(|| false);
     let mut pressed = use_signal(|| false);
-    let mut input_active = use_signal(|| false);
-    let expanded = input_active() || !prompt().is_empty();
 
     rsx! {
-        div { display: "flex",
+        div {
+            display: "flex",
+            flex_direction: "column",
+            width: "200px",
+            filter: if hovered() { "brightness(1.1)" } else { "brightness(1)" },
+            transform: if pressed() { "scale(0.98)" } else { "scale(1)" },
+            transition: "filter 0.15s ease, transform 0.1s ease",
+            onmouseenter: move |_| hovered.set(true),
+            onmouseleave: move |_| {
+                hovered.set(false);
+                pressed.set(false);
+            },
+            onmousedown: move |_| pressed.set(true),
+            onmouseup: move |_| pressed.set(false),
+            onclick: move |_| {
+                let p = prompt();
+                action.call(if p.trim().is_empty() { None } else { Some(p) });
+                prompt.set(String::new());
+            },
             button {
-                padding: "6px 14px",
-                border_radius: "8px 0 0 8px",
+                padding: "10px 14px",
+                flex_grow: "1",
+                border_radius: "8px 8px 0 0",
                 border: "none",
                 color: "white",
                 cursor: "pointer",
-                font_size: "13px",
+                font_size: "14px",
                 font_weight: "bolder",
                 background: "rgba(80, 140, 90)",
-                filter: if hovered() { "brightness(1.5)" } else { "brightness(1)" },
-                transform: if pressed() { "scale(1.03)" } else { "scale(1)" },
-                transition: "filter 0.15s ease, transform 0.1s ease",
-                onmouseenter: move |_| hovered.set(true),
-                onmouseleave: move |_| {
-                    hovered.set(false);
-                    pressed.set(false);
-                },
-                onmousedown: move |_| pressed.set(true),
-                onmouseup: move |_| pressed.set(false),
-                onclick: move |_| {
-                    let p = prompt();
-                    action.call(if p.trim().is_empty() { None } else { Some(p) });
-                    prompt.set(String::new());
-                },
                 "Generate"
             }
             input {
-                style: format!(
-                    "width: {}; border-radius: 0 8px 8px 0; background: rgba(100, 160, 110); border: none; outline: none; color: white; font-size: 13px; padding: 6px {}; transition: width 0.25s ease, padding 0.25s ease; text-align: left;",
-                    if expanded { "160px" } else { "30px" },
-                    if expanded { "10px" } else { "6px" },
-                ),
-                placeholder: if expanded { "Custom prompt..." } else { "✨" },
+                style: "width: 100%; border-radius: 0 0 8px 8px; background: rgba(100, 160, 110); border: none; outline: none; color: white; font-size: 13px; padding: 8px 10px;",
+                placeholder: "Custom prompt...",
                 value: prompt(),
                 oninput: move |e| prompt.set(e.value()),
-                onmouseenter: move |_| input_active.set(true),
-                onmouseleave: move |_| input_active.set(false),
-                onfocus: move |_| input_active.set(true),
-                onblur: move |_| input_active.set(false),
             }
         }
     }
@@ -220,9 +284,9 @@ fn EventsPanel(on_image_received: EventHandler<()>) -> Element {
     rsx! {
         div {
             display: "flex",
-            gap: "10px",
-            margin_left: "20px",
-            overflow_x: "auto",
+            flex_direction: "column",
+            align_items: "flex-end",
+            gap: "6px",
             for event in cached_events() {
                 GenerationEventView { key: "{event.id}", event }
             }
@@ -256,13 +320,96 @@ fn GenerationEventView(event: GenerationEvent) -> Element {
 
     rsx! {
         div {
-            padding: "4px 10px",
-            background: "rgba(255, 255, 255, 0.1)",
-            border_radius: "6px",
+            padding: "6px 12px",
+            background: "rgba(10, 10, 10, 0.4)",
+            backdrop_filter: "blur(10px)",
+            border_radius: "8px",
             font_size: "12px",
-            color: "#ccc",
+            font_weight: "bold",
+            color: "white",
             white_space: "nowrap",
+            box_shadow: "0 4px 12px rgba(0, 0, 0, 0.1)",
             "{text}"
+        }
+    }
+}
+
+/// Renders a wallpaper image with its hover effects and a prompt pill overlay at the bottom.
+/// `children` is rendered in the top area of the overlay (e.g. age pill + action buttons).
+/// `full_prompt` adds a second pill below the shortened one when provided.
+/// `show_prompts` controls the opacity of the bottom pills (for animated fade-in).
+#[component]
+fn WallpaperImageContent(
+    src: String,
+    liked_state: LikedState,
+    shortened_prompt: String,
+    #[props(default)] full_prompt: Option<String>,
+    #[props(default)] hovered: bool,
+    #[props(default = true)] show_prompts: bool,
+    children: Element,
+) -> Element {
+    let anim = format!("{FS_ANIM_MS}ms {FS_ANIM_CURVE}");
+    rsx! {
+        img {
+            width: "100%",
+            height: "100%",
+            object_fit: "cover",
+            display: "block",
+            loading: "lazy",
+            draggable: "false",
+            src,
+            transition: "transform 0.6s cubic-bezier(0.33, 1, 0.68, 1), filter 0.6s cubic-bezier(0.33, 1, 0.68, 1)",
+            transform: if hovered { "scale(1.1)" } else { "scale(1.01)" },
+            filter: if hovered { "brightness(1.1)" } else { "brightness(1)" },
+        }
+        div {
+            position: "absolute",
+            top: "0",
+            left: "0",
+            width: "100%",
+            height: "100%",
+            padding: "16px",
+            display: "flex",
+            flex_direction: "column",
+            justify_content: "space-between",
+            pointer_events: "none",
+
+            {children}
+
+            div {
+                display: "flex",
+                flex_direction: "column",
+                gap: "4px",
+                pointer_events: "auto",
+                opacity: if show_prompts { "1" } else { "0" },
+                transition: format!("opacity {anim}"),
+
+                Pill {
+                    color: like_color(liked_state),
+                    text: shortened_prompt.clone(),
+                    onclick: {
+                        let prompt = shortened_prompt;
+                        move |_| {
+                            if let Some(window) = web_sys::window() {
+                                let _ = window.navigator().clipboard().write_text(&prompt);
+                            }
+                        }
+                    },
+                }
+                if let Some(prompt) = full_prompt {
+                    Pill {
+                        color: like_color(liked_state),
+                        text: prompt.clone(),
+                        onclick: {
+                            move |_| {
+                                if let Some(window) = web_sys::window() {
+                                    let _ = window.navigator().clipboard().write_text(&prompt);
+                                }
+                            }
+                        },
+                    }
+                }
+            }
         }
     }
 }
@@ -278,9 +425,7 @@ fn WallpaperCard(w: WallpaperData) -> Element {
     let mut liked = use_signal(|| w.liked_state);
     let mut comment = use_signal(|| w.comment.clone().unwrap_or_default());
     let mut hovered = use_signal(|| false);
-    let mut fullscreen_id = use_context::<Signal<Option<uuid::Uuid>>>();
-
-    let is_fullscreen = fullscreen_id() == Some(w.id);
+    let mut fs = use_context::<Signal<FullscreenState>>();
 
     let mut update_like = move |target: LikedState| {
         let new_state = if liked() == target {
@@ -296,51 +441,61 @@ fn WallpaperCard(w: WallpaperData) -> Element {
         return rsx! {};
     }
 
+    let id = w.id;
+
     rsx! {
         div {
             id: "{w.id}",
             border_radius: "26px",
             overflow: "hidden",
-            grid_column: if is_fullscreen { "1 / -1" } else { "auto" },
-            min_width: "100%",
             width: "100%",
             transition: "box-shadow 0.4s cubic-bezier(0.33, 1, 0.68, 1)",
             box_shadow: if hovered() { "0 0 20px 4px rgba(20, 20, 20, 0.6)" } else { "0 0 12px 4px rgba(20, 20, 20, 0.4)" },
 
             div {
+                id: "img-{w.id}",
                 display: "block",
                 position: "relative",
                 aspect_ratio: "16 / 9",
                 overflow: "hidden",
                 cursor: "pointer",
-                onclick: move |_| fullscreen_id.set((!is_fullscreen).then_some(w.id)),
                 onmouseenter: move |_| hovered.set(true),
                 onmouseleave: move |_| hovered.set(false),
+                onclick: move |_| {
+                    let Some(window) = web_sys::window() else {
+                        return;
+                    };
+                    let Some(doc) = window.document() else {
+                        return;
+                    };
+                    let Some(el) = doc.get_element_by_id(&format!("img-{id}")) else {
+                        return;
+                    };
+                    let el: web_sys::HtmlElement = wasm_bindgen::JsCast::unchecked_into(el);
+                    let dom_rect = el.get_bounding_client_rect();
+                    let entry = FullscreenEntry {
+                        wallpaper: w.clone(),
+                        rect: CardRect {
+                            x: dom_rect.x(),
+                            y: dom_rect.y(),
+                            width: dom_rect.width(),
+                            height: dom_rect.height(),
+                        },
+                    };
+                    fs.set(FullscreenState::Snapped(entry));
+                    spawn(async move {
+                        gloo_timers::future::TimeoutFuture::new(16).await;
+                        if let FullscreenState::Snapped(entry) = fs() {
+                            fs.set(FullscreenState::Open(entry));
+                        }
+                    });
+                },
 
-                img {
-                    width: "100%",
-                    height: "100%",
-                    object_fit: "cover",
-                    display: "block",
+                WallpaperImageContent {
                     src: "/wallpapers/{w.image_file.file_name}",
-                    loading: "lazy",
-                    transition: "transform 0.6s cubic-bezier(0.33, 1, 0.68, 1), filter 0.6s cubic-bezier(0.33, 1, 0.68, 1)",
-                    transform: if hovered() { "scale(1.1)" } else { "scale(1.01)" },
-                    filter: if hovered() { "brightness(1.1)" } else { "brightness(1)" },
-                    draggable: "false",
-                }
-
-                div {
-                    position: "absolute",
-                    top: "0",
-                    left: "0",
-                    width: "100%",
-                    height: "100%",
-                    padding: "16px",
-                    display: "flex",
-                    flex_direction: "column",
-                    justify_content: "space-between",
-                    pointer_events: "none",
+                    liked_state: liked(),
+                    shortened_prompt: w.prompt_data.shortened_prompt.clone(),
+                    hovered: hovered(),
 
                     div {
                         height: "26px",
@@ -395,44 +550,6 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                             }
                         }
                     }
-
-                    div {
-                        display: "flex",
-                        flex_direction: "column",
-                        justify_content: "flex-start",
-                        gap: "4px",
-                        pointer_events: "auto",
-                        Pill {
-                            color: like_color(liked()),
-                            text: w.prompt_data.shortened_prompt.clone(),
-                            onclick: {
-                                let prompt = w.prompt_data.shortened_prompt.clone();
-                                move |_| {
-                                    if let Some(window) = web_sys::window() {
-                                        let nav = window.navigator();
-                                        let cb = nav.clipboard();
-                                        let _ = cb.write_text(&prompt);
-                                    }
-                                }
-                            },
-                        }
-                        if is_fullscreen {
-                            Pill {
-                                color: like_color(liked()),
-                                text: w.prompt_data.prompt.clone(),
-                                onclick: {
-                                    let prompt = w.prompt_data.prompt.clone();
-                                    move |_| {
-                                        if let Some(window) = web_sys::window() {
-                                            let nav = window.navigator();
-                                            let cb = nav.clipboard();
-                                            let _ = cb.write_text(&prompt);
-                                        }
-                                    }
-                                },
-                            }
-                        }
-                    }
                 }
             }
 
@@ -446,6 +563,105 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                     comment.set(val);
                     comment_action.call(w.id, saved);
                 },
+            }
+        }
+    }
+}
+
+#[component]
+fn FullscreenOverlay() -> Element {
+    let mut fs = use_context::<Signal<FullscreenState>>();
+
+    let state = fs();
+    let Some(entry) = state.entry() else {
+        return rsx! {};
+    };
+    let entry = entry.clone();
+    let rect = &entry.rect;
+
+    let at_card = matches!(
+        state,
+        FullscreenState::Snapped(_) | FullscreenState::Closing(_)
+    );
+    let with_transition = matches!(
+        state,
+        FullscreenState::Open(_) | FullscreenState::Closing(_)
+    );
+    let is_open = matches!(state, FullscreenState::Open(_));
+
+    let (top, left, width, height, border_radius) = if at_card {
+        (
+            format!("{}px", rect.y),
+            format!("{}px", rect.x),
+            format!("{}px", rect.width),
+            format!("{}px", rect.height),
+            "26px".to_string(),
+        )
+    } else {
+        (
+            "0px".to_string(),
+            "0px".to_string(),
+            "100vw".to_string(),
+            "100vh".to_string(),
+            "0px".to_string(),
+        )
+    };
+
+    let anim = format!("{FS_ANIM_MS}ms {FS_ANIM_CURVE}");
+    let transition = if with_transition {
+        format!("top {anim}, left {anim}, width {anim}, height {anim}, border-radius {anim}")
+    } else {
+        "none".to_string()
+    };
+
+    let close = move |_: MouseEvent| {
+        if let Some(entry) = fs().entry() {
+            let entry = entry.clone();
+            fs.set(FullscreenState::Closing(entry));
+            spawn(async move {
+                gloo_timers::future::TimeoutFuture::new(FS_ANIM_MS).await;
+                if matches!(fs(), FullscreenState::Closing(_)) {
+                    fs.set(FullscreenState::Hidden);
+                }
+            });
+        }
+    };
+
+    rsx! {
+        div {
+            position: "fixed",
+            top: "0",
+            left: "0",
+            width: "100vw",
+            height: "100vh",
+            z_index: "499",
+            background: "rgba(0, 0, 0, 0.65)",
+            opacity: if is_open { "1" } else { "0" },
+            transition: format!("opacity {anim}"),
+            pointer_events: if is_open { "auto" } else { "none" },
+            onclick: close,
+        }
+        div {
+            position: "fixed",
+            top,
+            left,
+            width,
+            height,
+            z_index: "500",
+            border_radius,
+            overflow: "hidden",
+            transition,
+            cursor: "pointer",
+            onclick: close,
+
+            WallpaperImageContent {
+                src: "/wallpapers/{entry.wallpaper.image_file.file_name}",
+                liked_state: entry.wallpaper.liked_state,
+                shortened_prompt: entry.wallpaper.prompt_data.shortened_prompt.clone(),
+                full_prompt: entry.wallpaper.prompt_data.prompt.clone(),
+                show_prompts: is_open,
+
+                div {}
             }
         }
     }

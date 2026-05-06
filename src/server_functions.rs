@@ -125,12 +125,10 @@ pub async fn action_recreate(id: Uuid) -> Result<(), ServerFnError> {
         })?;
 
     let id = Uuid::new_v4();
-    tokio::spawn(async move {
-        if let Err(e) = generate_wallpaper_impl(Some(prompt_data), None, id).await {
-            error!("Failed to recreate image: {e:?}");
-            remove_generation_event(id).await;
-        }
-    });
+    if let Err(e) = generate_wallpaper_impl(Some(prompt_data), None, id).await {
+        error!("Failed to recreate image: {e:?}");
+        remove_generation_event(id).await;
+    }
     Ok(())
 }
 

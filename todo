@@ -1,4 +1,6 @@
 Implement auth https://dioxuslabs.com/learn/0.7/essentials/fullstack/authentication
 Reimplement filters in current gallery, including a filter for smartget which would return potential candidates
-clean fullscreen with animation and scroll to
+clean fullscreen code to deduplicate so it reuses the whole component
 custom font
+try to improve performance
+make notifications bottom left stacked vertically (positioned absolute with animation)

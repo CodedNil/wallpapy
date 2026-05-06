@@ -3,6 +3,7 @@ use crate::{
     database::{Database, read_database},
 };
 use anyhow::{Result, anyhow};
+use rand::seq::IndexedRandom;
 use reqwest::{
     Client,
     header::{AUTHORIZATION, CONTENT_TYPE},
@@ -45,9 +46,6 @@ where
                 "strict": true,
                 "schema": schema_object
             }
-        },
-        "reasoning": {
-            "effort": "none"
         }
     });
 
@@ -85,7 +83,7 @@ where
 }
 
 /// Returns `(recent_timeline, liked_examples)` strings for use in prompt context.
-pub async fn build_context() -> Result<(String, String, String)> {
+async fn build_context() -> Result<(String, String, String)> {
     let database = read_database()
         .await
         .inspect_err(|e| error!("Failed accessing database {e:?}"))
@@ -140,6 +138,8 @@ pub async fn build_context() -> Result<(String, String, String)> {
     Ok((recent, liked.join("\n"), style_prompt))
 }
 
+const NOUN_POOL: &str = include_str!("nounlist.txt");
+
 pub async fn generate(message: Option<String>) -> Result<PromptData> {
     let (recent_history, liked_examples, style_prompt) = build_context().await?;
 
@@ -148,26 +148,36 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
         .map(|m| format!("\n\nUser request (prioritise this above all else): {m}"))
         .unwrap_or_default();
 
+    let nouns = {
+        let mut rng = rand::rng();
+        NOUN_POOL
+            .lines()
+            .filter(|l| !l.is_empty())
+            .collect::<Vec<_>>()
+            .as_slice()
+            .sample(&mut rng, 20)
+            .copied()
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+
     let mut context = vec![
         format!(
-            "You are a creative wallpaper image prompt generator. \
-             Write a vivid, detailed prompt for a desktop wallpaper, capitalised first letter, no newlines, no colon punctuation or other fancy formatting beyond commas, dont start with 'a ...'\n\
-             \n\
-             {style_prompt}\n\
-             \n\
-             To keep every wallpaper feeling completely fresh, aim for a design utterly \
-             unique to anything seen recently."
+            "You are a creative wallpaper image prompt generator. Write a vivid, detailed prompt for a desktop wallpaper\n
+             Start directly with the main subject, omitting leading articles. Use sentence case, single line only, no colons, use only commas for punctuation.\n
+             \n
+             {style_prompt}
+             \n
+             To keep every wallpaper feeling completely fresh, aim for a design utterly unique to anything seen recently. Here are a few random nouns to inspire (absolutely don't need to use any of them): [{nouns}]"
         ),
         format!(
-            "RECENT HISTORY (newest first) — the subject, setting, and mood of each must NOT be repeated:\n{recent_history}"
+            "RECENT HISTORY (newest first) — the subject, setting, and mood of each must NOT be repeated: [{recent_history}]"
         ),
     ];
 
     if !liked_examples.is_empty() {
         context.push(format!(
-            "QUALITY REFERENCE — the user loved/liked these. \
-             Aim for this level of quality and evocativeness, but choose a completely different \
-             subject and setting:\n{liked_examples}"
+            "QUALITY REFERENCE — the user loved/liked these. Aim for this level of quality and evocativeness, but choose a completely different subject and setting:\n{liked_examples}"
         ));
     }
 

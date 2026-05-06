@@ -4501,6 +4501,7 @@ dependencies = [
  "gloo-timers 0.4.0",
  "image",
  "mime_guess",
+ "rand 0.10.1",
  "reqwest 0.13.3",
  "ron",
  "schemars",
