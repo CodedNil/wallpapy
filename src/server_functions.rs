@@ -90,22 +90,20 @@ pub async fn action_like(id: Uuid, state: LikedState) -> Result<(), ServerFnErro
 
 #[delete("/api/wallpapers/{id}")]
 pub async fn action_delete(id: Uuid) -> Result<(), ServerFnError> {
-    let files_to_remove = with_db(|db| {
+    let file_to_remove = with_db(|db| {
         db.wallpapers
             .remove(&id)
-            .map(|w| vec![w.image_file.file_name, w.thumbnail_file.file_name])
+            .map(|w| w.image_file.file_name)
             .ok_or(StatusCode::NOT_FOUND)
     })
     .await
     .map_err(|status| ServerFnError::new(format!("Database error: {status}")))?;
 
-    for file_name in files_to_remove {
-        let file_path = WALLPAPERS_DIR.join(file_name);
-        if file_path.exists() {
-            tokio::fs::remove_file(file_path)
-                .await
-                .map_err(|e| ServerFnError::new(format!("File removal failed: {e}")))?;
-        }
+    let file_path = WALLPAPERS_DIR.join(file_to_remove);
+    if file_path.exists() {
+        tokio::fs::remove_file(file_path)
+            .await
+            .map_err(|e| ServerFnError::new(format!("File removal failed: {e}")))?;
     }
     Ok(())
 }

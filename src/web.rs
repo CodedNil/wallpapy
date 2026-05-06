@@ -72,6 +72,7 @@ pub fn app() -> Element {
                     font-family: sans-serif;
                     font-size: 14px;
                     min-height: 100vh;
+                    user-select: none;
                 }}
             "#
         }
@@ -326,6 +327,7 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                     transition: "transform 0.6s cubic-bezier(0.33, 1, 0.68, 1), filter 0.6s cubic-bezier(0.33, 1, 0.68, 1)",
                     transform: if hovered() { "scale(1.1)" } else { "scale(1.01)" },
                     filter: if hovered() { "brightness(1.1)" } else { "brightness(1)" },
+                    draggable: "false",
                 }
 
                 div {
@@ -394,10 +396,41 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                         }
                     }
 
-                    div { display: "flex", justify_content: "flex-start",
+                    div {
+                        display: "flex",
+                        flex_direction: "column",
+                        justify_content: "flex-start",
+                        gap: "4px",
+                        pointer_events: "auto",
                         Pill {
                             color: like_color(liked()),
-                            text: w.prompt_data.shortened_prompt,
+                            text: w.prompt_data.shortened_prompt.clone(),
+                            onclick: {
+                                let prompt = w.prompt_data.shortened_prompt.clone();
+                                move |_| {
+                                    if let Some(window) = web_sys::window() {
+                                        let nav = window.navigator();
+                                        let cb = nav.clipboard();
+                                        let _ = cb.write_text(&prompt);
+                                    }
+                                }
+                            },
+                        }
+                        if is_fullscreen {
+                            Pill {
+                                color: like_color(liked()),
+                                text: w.prompt_data.prompt.clone(),
+                                onclick: {
+                                    let prompt = w.prompt_data.prompt.clone();
+                                    move |_| {
+                                        if let Some(window) = web_sys::window() {
+                                            let nav = window.navigator();
+                                            let cb = nav.clipboard();
+                                            let _ = cb.write_text(&prompt);
+                                        }
+                                    }
+                                },
+                            }
                         }
                     }
                 }
@@ -454,7 +487,11 @@ fn GhostInput(
 }
 
 #[component]
-fn Pill(color: Option<&'static str>, text: String) -> Element {
+fn Pill(
+    color: Option<&'static str>,
+    text: String,
+    onclick: Option<EventHandler<MouseEvent>>,
+) -> Element {
     rsx! {
         span {
             padding: "6px 10px",
@@ -464,6 +501,13 @@ fn Pill(color: Option<&'static str>, text: String) -> Element {
             font_weight: "bold",
             background: format!("rgba({}, {OVERLAY_OPACITY})", color.unwrap_or(NEUTRAL_COLOR)),
             color: OVERLAY_TEXT_COLOR,
+            onclick: move |e| {
+                if let Some(handler) = onclick {
+                    e.stop_propagation();
+                    handler.call(e);
+                }
+            },
+            cursor: if onclick.is_some() { "pointer" } else { "default" },
             "{text}"
         }
     }

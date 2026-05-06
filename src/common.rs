@@ -12,10 +12,7 @@ pub struct WallpaperData {
     pub image_file: ImageFile,
     pub brightness: f32,
 
-    pub thumbnail_file: ImageFile,
-
     pub liked_state: LikedState,
-
     pub comment: Option<String>,
 }
 
@@ -28,10 +25,9 @@ pub struct ImageFile {
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq)]
 pub struct PromptData {
-    /// The prompt to send to the image generator
+    /// The prompt to send to the image generator, aim for 20 words, max 40 words
     pub prompt: String,
-    /// A shortened version of the prompt, only including the image description not style, aim for
-    /// 6 words, max 20 words
+    /// A concise version of the prompt, only including the image description not style, aim for 6 words, max 20 words
     pub shortened_prompt: String,
 }
 

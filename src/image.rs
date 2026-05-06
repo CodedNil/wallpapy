@@ -9,7 +9,10 @@ use axum::{
     response::IntoResponse,
 };
 use chrono::{Timelike, Utc};
-use image::{DynamicImage, GenericImageView, ImageReader, Pixel, imageops::FilterType};
+use image::{
+    DynamicImage, GenericImageView, ImageReader, Pixel, codecs::avif::AvifEncoder,
+    imageops::FilterType,
+};
 use reqwest::Client;
 use serde_json::json;
 use std::{
@@ -160,34 +163,21 @@ pub async fn generate_wallpaper_impl(
 
     let datetime_str = datetime.to_rfc3339();
 
-    let file_name = format!("{datetime_str}.webp");
-    fs::write(WALLPAPERS_DIR.join(&file_name), encode_webp(&image, 90.0)).await?;
+    let file_name = format!("{datetime_str}.avif");
+    fs::write(WALLPAPERS_DIR.join(&file_name), encode_avif(&image, 4, 80)?).await?;
     let image_file = ImageFile {
         file_name,
         width: image.width(),
         height: image.height(),
     };
 
-    let thumb_image = image.resize_to_fill(640, 360, FilterType::Lanczos3);
-    let thumb_file_name = format!("{datetime_str}_thumb.webp");
-    fs::write(
-        WALLPAPERS_DIR.join(&thumb_file_name),
-        encode_webp(&thumb_image, 70.0),
-    )
-    .await?;
-    let thumbnail_file = ImageFile {
-        file_name: thumb_file_name,
-        width: thumb_image.width(),
-        height: thumb_image.height(),
-    };
-
+    let small_image = image.resize_to_fill(640, 360, FilterType::Lanczos3);
     let wallpaper = WallpaperData {
         id,
         datetime,
         prompt_data,
         image_file,
-        brightness: top_20_percent_brightness(&thumb_image),
-        thumbnail_file,
+        brightness: top_20_percent_brightness(&small_image),
         liked_state: LikedState::Neutral,
         comment: None,
     };
@@ -204,11 +194,12 @@ pub async fn generate_wallpaper_impl(
     Ok(())
 }
 
-fn encode_webp(img: &DynamicImage, quality: f32) -> Vec<u8> {
-    webp::Encoder::from_image(img)
-        .unwrap()
-        .encode(quality)
-        .to_vec()
+fn encode_avif(img: &DynamicImage, speed: u8, quality: u8) -> Result<Vec<u8>> {
+    let mut buf = Vec::new();
+    img.write_with_encoder(AvifEncoder::new_with_speed_quality(
+        &mut buf, speed, quality,
+    ))?;
+    Ok(buf)
 }
 
 fn top_20_percent_brightness(img: &DynamicImage) -> f32 {
