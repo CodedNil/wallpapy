@@ -68,16 +68,24 @@ pub fn app() -> Element {
                 }}
 
                 body {{
-                    background-image: url("/smartget");
-                    background-color: rgba(0, 0, 0, 0.4);
-                    background-blend-mode: multiply;
-                    background-size: cover;
                     color: white;
                     font-family: sans-serif;
                     font-size: 14px;
                     min-height: 100vh;
                 }}
             "#
+        }
+        img {
+            src: "/smartget",
+            position: "fixed",
+            top: "0",
+            left: "0",
+            width: "100%",
+            height: "100%",
+            object_fit: "cover",
+            z_index: "-1",
+            filter: "blur(4px) brightness(0.8)",
+            transform: "scale(1.02)",
         }
         div {
             tabindex: "0",
@@ -154,7 +162,7 @@ fn GenerateButton() -> Element {
                 font_weight: "bolder",
                 background: "rgba(80, 140, 90)",
                 filter: if hovered() { "brightness(1.5)" } else { "brightness(1)" },
-                transform: if pressed() { "scale(0.97)" } else { "scale(1)" },
+                transform: if pressed() { "scale(1.03)" } else { "scale(1)" },
                 transition: "filter 0.15s ease, transform 0.1s ease",
                 onmouseenter: move |_| hovered.set(true),
                 onmouseleave: move |_| {
@@ -316,7 +324,7 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                     src: "/wallpapers/{w.image_file.file_name}",
                     loading: "lazy",
                     transition: "transform 0.6s cubic-bezier(0.33, 1, 0.68, 1), filter 0.6s cubic-bezier(0.33, 1, 0.68, 1)",
-                    transform: if hovered() { "scale(1.1)" } else { "scale(1)" },
+                    transform: if hovered() { "scale(1.1)" } else { "scale(1.01)" },
                     filter: if hovered() { "brightness(1.1)" } else { "brightness(1)" },
                 }
 
