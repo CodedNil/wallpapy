@@ -1,7 +1,7 @@
 use crate::common::{GenerationEvent, GenerationStage, LikedState, WallpaperData};
 use crate::server_functions::{
-    action_comment, action_delete, action_generate, action_like, action_recreate, action_styles,
-    load_gallery_data, stream_generation_events,
+    action_comment, action_delete, action_generate, action_like, action_styles, load_gallery_data,
+    stream_generation_events,
 };
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
@@ -14,41 +14,6 @@ const LIKED_COLOR: &str = "20, 80, 30";
 const DISLIKED_COLOR: &str = "90, 15, 15";
 const OVERLAY_OPACITY: &str = "0.7";
 const OVERLAY_TEXT_COLOR: &str = "rgba(255, 255, 255, 0.9)";
-
-const FS_ANIM_MS: u32 = 450;
-const FS_ANIM_CURVE: &str = "cubic-bezier(0.33, 1, 0.68, 1)";
-
-#[derive(Clone, PartialEq)]
-struct CardRect {
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-}
-
-#[derive(Clone, PartialEq)]
-struct FullscreenEntry {
-    wallpaper: WallpaperData,
-    rect: CardRect,
-}
-
-#[derive(Clone, PartialEq, Default)]
-enum FullscreenState {
-    #[default]
-    Hidden,
-    Snapped(FullscreenEntry),
-    Open(FullscreenEntry),
-    Closing(FullscreenEntry),
-}
-
-impl FullscreenState {
-    const fn entry(&self) -> Option<&FullscreenEntry> {
-        match self {
-            Self::Hidden => None,
-            Self::Snapped(e) | Self::Open(e) | Self::Closing(e) => Some(e),
-        }
-    }
-}
 
 const fn like_color(state: LikedState) -> Option<&'static str> {
     match state {
@@ -76,22 +41,6 @@ fn format_age(dt: DateTime<Utc>) -> String {
 }
 
 pub fn app() -> Element {
-    let mut fs = use_context_provider(|| Signal::new(FullscreenState::default()));
-
-    let mut close_fs = move || {
-        let current = fs();
-        if let Some(entry) = current.entry() {
-            let entry = entry.clone();
-            fs.set(FullscreenState::Closing(entry));
-            spawn(async move {
-                gloo_timers::future::TimeoutFuture::new(FS_ANIM_MS).await;
-                if matches!(fs(), FullscreenState::Closing(_)) {
-                    fs.set(FullscreenState::Hidden);
-                }
-            });
-        }
-    };
-
     rsx! {
         document::Title { "Wallpapy" }
         document::Meta { name: "darkreader-lock" }
@@ -137,16 +86,7 @@ pub fn app() -> Element {
             filter: "blur(40px) brightness(0.8)",
             transform: "scale(1.02)",
         }
-        div {
-            tabindex: "0",
-            onkeydown: move |e| {
-                if e.key() == Key::Escape {
-                    close_fs();
-                }
-            },
-            GalleryPage {}
-        }
-        FullscreenOverlay {}
+        div { GalleryPage {} }
     }
 }
 
@@ -337,90 +277,9 @@ fn GenerationEventView(event: GenerationEvent) -> Element {
     }
 }
 
-/// Renders a wallpaper image with its hover effects and a prompt pill overlay at the bottom.
-/// `children` is rendered in the top area of the overlay (e.g. age pill + action buttons).
-/// `full_prompt` adds a second pill below the shortened one when provided.
-/// `show_prompts` controls the opacity of the bottom pills (for animated fade-in).
-#[component]
-fn WallpaperImageContent(
-    src: String,
-    liked_state: LikedState,
-    shortened_prompt: String,
-    #[props(default)] full_prompt: Option<String>,
-    #[props(default)] hovered: bool,
-    #[props(default = true)] show_prompts: bool,
-    children: Element,
-) -> Element {
-    let anim = format!("{FS_ANIM_MS}ms {FS_ANIM_CURVE}");
-    rsx! {
-        img {
-            width: "100%",
-            height: "100%",
-            object_fit: "cover",
-            display: "block",
-            loading: "lazy",
-            draggable: "false",
-            src,
-            transition: "transform 0.6s cubic-bezier(0.33, 1, 0.68, 1), filter 0.6s cubic-bezier(0.33, 1, 0.68, 1)",
-            transform: if hovered { "scale(1.1)" } else { "scale(1.01)" },
-            filter: if hovered { "brightness(1.1)" } else { "brightness(1)" },
-        }
-        div {
-            position: "absolute",
-            top: "0",
-            left: "0",
-            width: "100%",
-            height: "100%",
-            padding: "16px",
-            display: "flex",
-            flex_direction: "column",
-            justify_content: "space-between",
-            pointer_events: "none",
-
-            {children}
-
-            div {
-                display: "flex",
-                flex_direction: "column",
-                gap: "4px",
-                pointer_events: "auto",
-                opacity: if show_prompts { "1" } else { "0" },
-                transition: format!("opacity {anim}"),
-
-                Pill {
-                    color: like_color(liked_state),
-                    text: shortened_prompt.clone(),
-                    onclick: {
-                        let prompt = shortened_prompt;
-                        move |_| {
-                            if let Some(window) = web_sys::window() {
-                                let _ = window.navigator().clipboard().write_text(&prompt);
-                            }
-                        }
-                    },
-                }
-                if let Some(prompt) = full_prompt {
-                    Pill {
-                        color: like_color(liked_state),
-                        text: prompt.clone(),
-                        onclick: {
-                            move |_| {
-                                if let Some(window) = web_sys::window() {
-                                    let _ = window.navigator().clipboard().write_text(&prompt);
-                                }
-                            }
-                        },
-                    }
-                }
-            }
-        }
-    }
-}
-
 #[component]
 fn WallpaperCard(w: WallpaperData) -> Element {
     let mut like_action = use_action(action_like);
-    let mut recreate_action = use_action(action_recreate);
     let mut delete_action = use_action(action_delete);
     let mut comment_action = use_action(action_comment);
 
@@ -428,7 +287,6 @@ fn WallpaperCard(w: WallpaperData) -> Element {
     let mut liked = use_signal(|| w.liked_state);
     let mut comment = use_signal(|| w.comment.clone().unwrap_or_default());
     let mut hovered = use_signal(|| false);
-    let mut fs = use_context::<Signal<FullscreenState>>();
 
     let mut update_like = move |target: LikedState| {
         let new_state = if liked() == target {
@@ -443,8 +301,6 @@ fn WallpaperCard(w: WallpaperData) -> Element {
     if deleted() {
         return rsx! {};
     }
-
-    let id = w.id;
 
     rsx! {
         div {
@@ -464,41 +320,30 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                 cursor: "pointer",
                 onmouseenter: move |_| hovered.set(true),
                 onmouseleave: move |_| hovered.set(false),
-                onclick: move |_| {
-                    let Some(window) = web_sys::window() else {
-                        return;
-                    };
-                    let Some(doc) = window.document() else {
-                        return;
-                    };
-                    let Some(el) = doc.get_element_by_id(&format!("img-{id}")) else {
-                        return;
-                    };
-                    let el: web_sys::HtmlElement = wasm_bindgen::JsCast::unchecked_into(el);
-                    let dom_rect = el.get_bounding_client_rect();
-                    let entry = FullscreenEntry {
-                        wallpaper: w.clone(),
-                        rect: CardRect {
-                            x: dom_rect.x(),
-                            y: dom_rect.y(),
-                            width: dom_rect.width(),
-                            height: dom_rect.height(),
-                        },
-                    };
-                    fs.set(FullscreenState::Snapped(entry));
-                    spawn(async move {
-                        gloo_timers::future::TimeoutFuture::new(16).await;
-                        if let FullscreenState::Snapped(entry) = fs() {
-                            fs.set(FullscreenState::Open(entry));
-                        }
-                    });
-                },
 
-                WallpaperImageContent {
+                img {
+                    width: "100%",
+                    height: "100%",
+                    object_fit: "cover",
+                    display: "block",
+                    loading: "lazy",
+                    draggable: "false",
                     src: "/wallpapers/{w.image_file.file_name}",
-                    liked_state: liked(),
-                    shortened_prompt: w.prompt_data.shortened_prompt.clone(),
-                    hovered: hovered(),
+                    transition: "transform 0.6s cubic-bezier(0.33, 1, 0.68, 1), filter 0.6s cubic-bezier(0.33, 1, 0.68, 1)",
+                    transform: if hovered() { "scale(1.1)" } else { "scale(1.01)" },
+                    filter: if hovered() { "brightness(1.1)" } else { "brightness(1)" },
+                }
+                div {
+                    position: "absolute",
+                    top: "0",
+                    left: "0",
+                    width: "100%",
+                    height: "100%",
+                    padding: "16px",
+                    display: "flex",
+                    flex_direction: "column",
+                    justify_content: "space-between",
+                    pointer_events: "none",
 
                     div {
                         height: "26px",
@@ -537,13 +382,6 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                                 },
                             }
                             IconButton {
-                                icon: fa_solid_icons::FaArrowRotateLeft,
-                                onclick: move |e: MouseEvent| {
-                                    e.stop_propagation();
-                                    recreate_action.call(w.id);
-                                },
-                            }
-                            IconButton {
                                 icon: fa_solid_icons::FaTrash,
                                 onclick: move |e: MouseEvent| {
                                     e.stop_propagation();
@@ -551,6 +389,26 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                                     delete_action.call(w.id);
                                 },
                             }
+                        }
+                    }
+
+                    div {
+                        display: "flex",
+                        flex_direction: "column",
+                        gap: "4px",
+                        pointer_events: "auto",
+
+                        Pill {
+                            color: like_color(liked()),
+                            text: w.prompt_data.shortened_prompt.clone(),
+                            onclick: {
+                                let prompt = w.prompt_data.shortened_prompt;
+                                move |_| {
+                                    if let Some(window) = web_sys::window() {
+                                        let _ = window.navigator().clipboard().write_text(&prompt);
+                                    }
+                                }
+                            },
                         }
                     }
                 }
@@ -566,105 +424,6 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                     comment.set(val);
                     comment_action.call(w.id, saved);
                 },
-            }
-        }
-    }
-}
-
-#[component]
-fn FullscreenOverlay() -> Element {
-    let mut fs = use_context::<Signal<FullscreenState>>();
-
-    let state = fs();
-    let Some(entry) = state.entry() else {
-        return rsx! {};
-    };
-    let entry = entry.clone();
-    let rect = &entry.rect;
-
-    let at_card = matches!(
-        state,
-        FullscreenState::Snapped(_) | FullscreenState::Closing(_)
-    );
-    let with_transition = matches!(
-        state,
-        FullscreenState::Open(_) | FullscreenState::Closing(_)
-    );
-    let is_open = matches!(state, FullscreenState::Open(_));
-
-    let (top, left, width, height, border_radius) = if at_card {
-        (
-            format!("{}px", rect.y),
-            format!("{}px", rect.x),
-            format!("{}px", rect.width),
-            format!("{}px", rect.height),
-            "26px".to_string(),
-        )
-    } else {
-        (
-            "0px".to_string(),
-            "0px".to_string(),
-            "100vw".to_string(),
-            "100vh".to_string(),
-            "0px".to_string(),
-        )
-    };
-
-    let anim = format!("{FS_ANIM_MS}ms {FS_ANIM_CURVE}");
-    let transition = if with_transition {
-        format!("top {anim}, left {anim}, width {anim}, height {anim}, border-radius {anim}")
-    } else {
-        "none".to_string()
-    };
-
-    let close = move |_: MouseEvent| {
-        if let Some(entry) = fs().entry() {
-            let entry = entry.clone();
-            fs.set(FullscreenState::Closing(entry));
-            spawn(async move {
-                gloo_timers::future::TimeoutFuture::new(FS_ANIM_MS).await;
-                if matches!(fs(), FullscreenState::Closing(_)) {
-                    fs.set(FullscreenState::Hidden);
-                }
-            });
-        }
-    };
-
-    rsx! {
-        div {
-            position: "fixed",
-            top: "0",
-            left: "0",
-            width: "100vw",
-            height: "100vh",
-            z_index: "499",
-            background: "rgba(0, 0, 0, 0.65)",
-            opacity: if is_open { "1" } else { "0" },
-            transition: format!("opacity {anim}"),
-            pointer_events: if is_open { "auto" } else { "none" },
-            onclick: close,
-        }
-        div {
-            position: "fixed",
-            top,
-            left,
-            width,
-            height,
-            z_index: "500",
-            border_radius,
-            overflow: "hidden",
-            transition,
-            cursor: "pointer",
-            onclick: close,
-
-            WallpaperImageContent {
-                src: "/wallpapers/{entry.wallpaper.image_file.file_name}",
-                liked_state: entry.wallpaper.liked_state,
-                shortened_prompt: entry.wallpaper.prompt_data.shortened_prompt.clone(),
-                full_prompt: entry.wallpaper.prompt_data.prompt.clone(),
-                show_prompts: is_open,
-
-                div {}
             }
         }
     }

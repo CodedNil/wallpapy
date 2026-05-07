@@ -62,7 +62,7 @@ pub async fn start_server() {
 
                 if cur_time - latest_time > NEW_WALLPAPER_INTERVAL {
                     let id = Uuid::new_v4();
-                    if let Err(e) = generate_wallpaper_impl(None, None, id).await {
+                    if let Err(e) = generate_wallpaper_impl(None, id).await {
                         tracing::error!("generate failed: {e:?}");
                         remove_generation_event(id).await;
                     }

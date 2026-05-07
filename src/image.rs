@@ -1,5 +1,5 @@
 use crate::{
-    common::{GenerationStage, ImageFile, LikedState, PromptData, WallpaperData},
+    common::{GenerationStage, ImageFile, LikedState, WallpaperData},
     database::{WALLPAPERS_DIR, read_database, write_database},
     gpt, routing,
 };
@@ -127,11 +127,7 @@ pub async fn smartget() -> Result<impl IntoResponse, StatusCode> {
     serve_file(&wallpapers[index].image_file.file_name).await
 }
 
-pub async fn generate_wallpaper_impl(
-    prompt_data: Option<PromptData>,
-    message: Option<String>,
-    id: Uuid,
-) -> Result<()> {
+pub async fn generate_wallpaper_impl(message: Option<String>, id: Uuid) -> Result<()> {
     info!("Generating wallpaper");
 
     routing::update_generation_event(id, GenerationStage::WaitingForPrompt).await;
@@ -141,12 +137,8 @@ pub async fn generate_wallpaper_impl(
     let api_token =
         env::var("REPLICATE_API_TOKEN").expect("REPLICATE_API_TOKEN environment variable not set");
 
-    let prompt_data = match prompt_data {
-        Some(p) => p,
-        None => gpt::generate(message)
-            .await?
-            .tap(|p| info!("Generated prompt: {}", p.prompt)),
-    };
+    let prompt_data = gpt::generate(message).await?;
+    info!("Generated prompt: {}", prompt_data.prompt);
 
     routing::update_generation_event(
         id,

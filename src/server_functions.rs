@@ -65,7 +65,7 @@ pub async fn stream_generation_events() -> Result<ServerEvents<Vec<GenerationEve
 pub async fn action_generate(prompt: Option<String>) -> Result<(), ServerFnError> {
     let prompt = prompt.filter(|p| !p.trim().is_empty());
     let id = Uuid::new_v4();
-    if let Err(e) = generate_wallpaper_impl(None, prompt, id).await {
+    if let Err(e) = generate_wallpaper_impl(prompt, id).await {
         update_generation_event(
             id,
             GenerationStage::Failed {
@@ -113,30 +113,6 @@ pub async fn action_delete(id: Uuid) -> Result<(), ServerFnError> {
         tokio::fs::remove_file(file_path)
             .await
             .map_err(|e| ServerFnError::new(format!("File removal failed: {e}")))?;
-    }
-    Ok(())
-}
-
-#[post("/api/wallpapers/{id}/recreate")]
-pub async fn action_recreate(id: Uuid) -> Result<(), ServerFnError> {
-    let prompt_data = read_database()
-        .await
-        .map_err(|e| {
-            tracing::error!("DB read failed: {e:?}");
-            ServerFnError::new("Database read error")
-        })?
-        .wallpapers
-        .get(&id)
-        .map(|w| w.prompt_data.clone())
-        .ok_or_else(|| {
-            tracing::error!("Recreate: wallpaper not found {id}");
-            ServerFnError::new("Wallpaper not found")
-        })?;
-
-    let id = Uuid::new_v4();
-    if let Err(e) = generate_wallpaper_impl(Some(prompt_data), None, id).await {
-        tracing::error!("Failed to recreate image: {e:?}");
-        remove_generation_event(id).await;
     }
     Ok(())
 }
