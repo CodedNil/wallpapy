@@ -33,7 +33,7 @@ where
     });
 
     let payload = json!({
-        "model": env::var("OPENROUTER_MODEL").unwrap_or_else(|_| "deepseek-v4-flash".to_string()),
+        "model": env::var("OPENROUTER_MODEL").unwrap_or_else(|_| "deepseek/deepseek-v4-flash".to_string()),
         "structured_outputs": true,
         "messages": [
             { "role": "system", "content": context.join("\n\n") },

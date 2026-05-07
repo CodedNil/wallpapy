@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 use dioxus_free_icons::{Icon, IconShape, icons::fa_solid_icons};
 use std::collections::HashSet;
+use uuid::Uuid;
 
 const NEUTRAL_COLOR: &str = "10, 10, 10";
 const LOVED_COLOR: &str = "160, 100, 10";
@@ -94,6 +95,7 @@ pub fn app() -> Element {
 fn GalleryPage() -> Element {
     let mut styles_action = use_action(action_styles);
     let mut data = use_server_future(load_gallery_data)?;
+    let mut expanded_id: Signal<Option<Uuid>> = use_signal(|| None);
 
     let Some(Ok(gallery)) = data() else {
         return rsx! {
@@ -103,50 +105,76 @@ fn GalleryPage() -> Element {
 
     rsx! {
         div {
-            display: "grid",
-            grid_template_columns: "repeat(auto-fill, minmax(360px, 1fr))",
-            gap: "20px",
-            padding: "20px",
-            for w in gallery.items {
-                WallpaperCard { key: "{w.id}", w }
+            onkeydown: move |e| {
+                if e.key() == Key::Escape {
+                    expanded_id.set(None);
+                }
+            },
+
+            if expanded_id().is_some() {
+                div {
+                    position: "fixed",
+                    top: "0",
+                    left: "0",
+                    right: "0",
+                    bottom: "0",
+                    z_index: "498",
+                    background: "rgba(0, 0, 0, 0.6)",
+                    backdrop_filter: "blur(6px)",
+                    tabindex: "-1",
+                    onmounted: move |e| async move {
+                        let _ = e.set_focus(true).await;
+                    },
+                    onclick: move |_| expanded_id.set(None),
+                }
             }
-        }
-
-        div {
-            position: "fixed",
-            bottom: "20px",
-            right: "20px",
-            z_index: "100",
-            display: "flex",
-            flex_direction: "column",
-            align_items: "flex-end",
-            gap: "10px",
-
-            EventsPanel { on_image_received: move || data.restart() }
 
             div {
+                display: "grid",
+                grid_template_columns: "repeat(auto-fill, minmax(360px, 1fr))",
+                gap: "20px",
+                padding: "20px",
+                for w in gallery.items {
+                    WallpaperCard { key: "{w.id}", w, expanded_id }
+                }
+            }
+
+            div {
+                position: "fixed",
+                bottom: "20px",
+                right: "20px",
+                z_index: "100",
                 display: "flex",
-                gap: "16px",
-                padding: "12px",
-                background: "rgba(255, 255, 255, 0.2)",
-                backdrop_filter: "blur(20px)",
-                border_radius: "16px",
-                border: "1px solid rgba(255, 255, 255, 0.3)",
-                align_items: "stretch",
-                box_shadow: "0 8px 32px rgba(0, 0, 0, 0.3)",
+                flex_direction: "column",
+                align_items: "flex-end",
+                gap: "10px",
+
+                EventsPanel { on_image_received: move || data.restart() }
 
                 div {
                     display: "flex",
-                    width: "400px",
+                    gap: "16px",
+                    padding: "12px",
+                    background: "rgba(255, 255, 255, 0.2)",
+                    backdrop_filter: "blur(20px)",
                     border_radius: "16px",
-                    overflow: "hidden",
-                    GhostInput {
-                        value: gallery.style_prompt,
-                        placeholder: "Style prompt...",
-                        oninput: move |val| styles_action.call(val),
+                    border: "1px solid rgba(255, 255, 255, 0.3)",
+                    align_items: "stretch",
+                    box_shadow: "0 8px 32px rgba(0, 0, 0, 0.3)",
+
+                    div {
+                        display: "flex",
+                        width: "400px",
+                        border_radius: "16px",
+                        overflow: "hidden",
+                        GhostInput {
+                            value: gallery.style_prompt,
+                            placeholder: "Style prompt...",
+                            oninput: move |val| styles_action.call(val),
+                        }
                     }
+                    GenerateButton {}
                 }
-                GenerateButton {}
             }
         }
     }
@@ -172,13 +200,6 @@ fn GenerateButton() -> Element {
                 hovered.set(false);
                 pressed.set(false);
             },
-            onmousedown: move |_| pressed.set(true),
-            onmouseup: move |_| pressed.set(false),
-            onclick: move |_| {
-                let p = prompt();
-                action.call(if p.trim().is_empty() { None } else { Some(p) });
-                prompt.set(String::new());
-            },
             button {
                 padding: "10px 14px",
                 flex_grow: "1",
@@ -189,10 +210,17 @@ fn GenerateButton() -> Element {
                 font_size: "14px",
                 font_weight: "bolder",
                 background: "rgba(80, 140, 90)",
+                onmousedown: move |_| pressed.set(true),
+                onmouseup: move |_| pressed.set(false),
+                onclick: move |_| {
+                    let p = prompt();
+                    action.call(if p.trim().is_empty() { None } else { Some(p) });
+                    prompt.set(String::new());
+                },
                 "Generate"
             }
             input {
-                style: "width: 100%; border-radius: 0 0 8px 8px; background: rgba(100, 160, 110); border: none; outline: none; color: white; font-size: 13px; padding: 8px 10px;",
+                style: "width: 100%; border-radius: 0 0 8px 8px; background: rgba(100, 160, 110); border: none; outline: none; color: white; font-size: 13px; padding: 8px 10px; text-align: center;",
                 placeholder: "Custom prompt...",
                 value: prompt(),
                 oninput: move |e| prompt.set(e.value()),
@@ -278,7 +306,7 @@ fn GenerationEventView(event: GenerationEvent) -> Element {
 }
 
 #[component]
-fn WallpaperCard(w: WallpaperData) -> Element {
+fn WallpaperCard(w: WallpaperData, mut expanded_id: Signal<Option<Uuid>>) -> Element {
     let mut like_action = use_action(action_like);
     let mut delete_action = use_action(action_delete);
     let mut comment_action = use_action(action_comment);
@@ -287,6 +315,33 @@ fn WallpaperCard(w: WallpaperData) -> Element {
     let mut liked = use_signal(|| w.liked_state);
     let mut comment = use_signal(|| w.comment.clone().unwrap_or_default());
     let mut hovered = use_signal(|| false);
+    let mut open_anim = use_signal(|| false);
+    let mut start_rect: Signal<Option<(f64, f64, f64, f64)>> = use_signal(|| None);
+    let mut end_rect: Signal<Option<(f64, f64, f64, f64)>> = use_signal(|| None);
+    let mut is_closing = use_signal(|| false);
+
+    let is_expanded = expanded_id() == Some(w.id);
+    let is_active = is_expanded || is_closing();
+
+    use_effect(move || {
+        let currently_expanded = expanded_id() == Some(w.id);
+        let rect_set = start_rect().is_some();
+        if currently_expanded && !open_anim() && !is_closing() {
+            spawn(async move {
+                gloo_timers::future::TimeoutFuture::new(50).await;
+                open_anim.set(true);
+            });
+        } else if !currently_expanded && rect_set && !is_closing() && open_anim() {
+            is_closing.set(true);
+            open_anim.set(false);
+            spawn(async move {
+                gloo_timers::future::TimeoutFuture::new(450).await;
+                start_rect.set(None);
+                end_rect.set(None);
+                is_closing.set(false);
+            });
+        }
+    });
 
     let mut update_like = move |target: LikedState| {
         let new_state = if liked() == target {
@@ -298,18 +353,41 @@ fn WallpaperCard(w: WallpaperData) -> Element {
         like_action.call(w.id, new_state);
     };
 
+    let (pos_top, pos_left, pos_width) = match (is_active, open_anim()) {
+        (true, false) => {
+            let (t, l, w, _) = start_rect().unwrap_or((0.0, 0.0, 0.0, 0.0));
+            (format!("{t}px"), format!("{l}px"), format!("{w}px"))
+        }
+        (true, true) => {
+            let (t, l, w, _) = end_rect().unwrap_or((0.0, 0.0, 0.0, 0.0));
+            (format!("{t}px"), format!("{l}px"), format!("{w}px"))
+        }
+        _ => ("auto".to_string(), "auto".to_string(), "100%".to_string()),
+    };
+
     if deleted() {
         return rsx! {};
     }
 
     rsx! {
+        if is_active {
+            div {
+                width: "100%",
+                height: start_rect().map_or_else(|| "0px".to_string(), |r| format!("{}px", r.3)),
+            }
+        }
+
         div {
             id: "{w.id}",
             border_radius: "26px",
             overflow: "hidden",
-            width: "100%",
-            transition: "box-shadow 0.4s cubic-bezier(0.33, 1, 0.68, 1)",
-            box_shadow: if hovered() { "0 0 20px 4px rgba(20, 20, 20, 0.6)" } else { "0 0 12px 4px rgba(20, 20, 20, 0.4)" },
+            position: if is_active { "fixed" } else { "relative" },
+            top: pos_top,
+            left: pos_left,
+            width: pos_width,
+            z_index: if is_active { "499" } else { "auto" },
+            transition: if is_active && (open_anim() || is_closing()) { "top 0.4s cubic-bezier(0.33, 1, 0.68, 1), left 0.4s cubic-bezier(0.33, 1, 0.68, 1), width 0.4s cubic-bezier(0.33, 1, 0.68, 1), box-shadow 0.4s ease" } else { "box-shadow 0.4s cubic-bezier(0.33, 1, 0.68, 1)" },
+            box_shadow: if is_active { "0 24px 80px rgba(0, 0, 0, 0.8)" } else if hovered() { "0 0 20px 4px rgba(20, 20, 20, 0.6)" } else { "0 0 12px 4px rgba(20, 20, 20, 0.4)" },
 
             div {
                 id: "img-{w.id}",
@@ -317,9 +395,39 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                 position: "relative",
                 aspect_ratio: "16 / 9",
                 overflow: "hidden",
-                cursor: "pointer",
+                cursor: if is_active { "default" } else { "pointer" },
                 onmouseenter: move |_| hovered.set(true),
                 onmouseleave: move |_| hovered.set(false),
+                onclick: move |_| {
+                    if !is_active {
+                        if let Some(window) = web_sys::window()
+                            && let Some(doc) = window.document()
+                            && let Some(elem) = doc.get_element_by_id(&w.id.to_string())
+                        {
+                            let vw = window
+                                .inner_width()
+                                .ok()
+                                .and_then(|v| v.as_f64())
+                                .unwrap_or(1920.0);
+                            let vh = window
+                                .inner_height()
+                                .ok()
+                                .and_then(|v| v.as_f64())
+                                .unwrap_or(1080.0);
+                            let r = elem.get_bounding_client_rect();
+                            let sw = r.width();
+                            let sh = r.height();
+                            let ew = f64::min(
+                                vw * 0.92,
+                                (vh * 0.92 - (sh - sw * 9.0 / 16.0)) * 16.0 / 9.0,
+                            );
+                            let eh = ew * 9.0 / 16.0 + (sh - sw * 9.0 / 16.0);
+                            start_rect.set(Some((r.top(), r.left(), sw, sh)));
+                            end_rect.set(Some(((vh - eh) / 2.0, (vw - ew) / 2.0, ew, eh)));
+                        }
+                        expanded_id.set(Some(w.id));
+                    }
+                },
 
                 img {
                     width: "100%",
@@ -330,8 +438,8 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                     draggable: "false",
                     src: "/wallpapers/{w.image_file.file_name}",
                     transition: "transform 0.6s cubic-bezier(0.33, 1, 0.68, 1), filter 0.6s cubic-bezier(0.33, 1, 0.68, 1)",
-                    transform: if hovered() { "scale(1.1)" } else { "scale(1.01)" },
-                    filter: if hovered() { "brightness(1.1)" } else { "brightness(1)" },
+                    transform: if hovered() && !is_active { "scale(1.1)" } else { "scale(1.01)" },
+                    filter: if hovered() && !is_active { "brightness(1.1)" } else { "brightness(1)" },
                 }
                 div {
                     position: "absolute",
@@ -386,6 +494,7 @@ fn WallpaperCard(w: WallpaperData) -> Element {
                                 onclick: move |e: MouseEvent| {
                                     e.stop_propagation();
                                     deleted.set(true);
+                                    expanded_id.set(None);
                                     delete_action.call(w.id);
                                 },
                             }
@@ -400,13 +509,19 @@ fn WallpaperCard(w: WallpaperData) -> Element {
 
                         Pill {
                             color: like_color(liked()),
-                            text: w.prompt_data.shortened_prompt.clone(),
-                            onclick: {
-                                let prompt = w.prompt_data.shortened_prompt;
-                                move |_| {
-                                    if let Some(window) = web_sys::window() {
-                                        let _ = window.navigator().clipboard().write_text(&prompt);
-                                    }
+                            text: if is_active { "{w.prompt_data.prompt}" } else { "{w.prompt_data.shortened_prompt}" },
+                            onclick: move |_| {
+                                if let Some(window) = web_sys::window() {
+                                    let _ = window
+                                        .navigator()
+                                        .clipboard()
+                                        .write_text(
+                                            if is_active {
+                                                &w.prompt_data.prompt
+                                            } else {
+                                                &w.prompt_data.shortened_prompt
+                                            },
+                                        );
                                 }
                             },
                         }

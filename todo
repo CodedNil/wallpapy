@@ -1,7 +1,4 @@
-Implement auth https://dioxuslabs.com/learn/0.7/essentials/fullstack/authentication
 Reimplement filters in current gallery, including a filter for smartget which would return potential candidates
-clean fullscreen code, no separate component just have a sized background div for the images and then physically move the main content
 custom font
 try to improve performance
-cant click custom prompt, it clicks generate
 doesnt seem to use the custom prompt, try to make it avoid overly complex prompts
