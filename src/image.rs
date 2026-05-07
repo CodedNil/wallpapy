@@ -92,9 +92,9 @@ pub async fn smartget() -> Result<impl IntoResponse, StatusCode> {
     })?;
     let now = Utc::now();
     let brightness_range = match now.hour() {
-        7..=9 | 17..=21 => (0.3, 0.6),
-        10..=16 => (0.5, 1.0),
-        _ => (0.0, 0.55),
+        7..=9 | 17..=21 => (0.5, 0.65),
+        10..=16 => (0.65, 1.0),
+        _ => (0.0, 0.5),
     };
 
     let wallpapers = db

@@ -163,7 +163,7 @@ pub async fn generate(message: Option<String>) -> Result<PromptData> {
 
     let mut context = vec![
         format!(
-            "You are a creative wallpaper image prompt generator. Write a vivid, detailed prompt for a desktop wallpaper\n
+            "You are a creative wallpaper image prompt generator. Write a vivid, prompt for a desktop wallpaper, don't go heavy on flowery language, keep it simple and descriptive\n
              Start directly with the main subject, omitting leading articles. Use sentence case, single line only, no colons, use only commas for punctuation.\n
              \n
              {style_prompt}

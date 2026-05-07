@@ -25,9 +25,9 @@ pub struct ImageFile {
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq)]
 pub struct PromptData {
-    /// The prompt to send to the image generator, aim for 20 words, max 40 words
+    /// The prompt to send to the image generator, aim for 14 words, max 30 words
     pub prompt: String,
-    /// A concise version of the prompt, only including the image description not style, aim for 6 words, max 20 words
+    /// A concise version of the prompt, only including the image description not style, aim for 6 words, max 18 words
     pub shortened_prompt: String,
 }
 

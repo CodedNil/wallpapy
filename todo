@@ -1,4 +1,0 @@
-Reimplement filters in current gallery, including a filter for smartget which would return potential candidates
-custom font
-try to improve performance
-doesnt seem to use the custom prompt, try to make it avoid overly complex prompts

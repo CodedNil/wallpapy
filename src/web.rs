@@ -13,8 +13,26 @@ const NEUTRAL_COLOR: &str = "10, 10, 10";
 const LOVED_COLOR: &str = "160, 100, 10";
 const LIKED_COLOR: &str = "20, 80, 30";
 const DISLIKED_COLOR: &str = "90, 15, 15";
+const FILTER_ACTIVE_COLOR: &str = "160, 100, 10";
 const OVERLAY_OPACITY: &str = "0.7";
 const OVERLAY_TEXT_COLOR: &str = "rgba(255, 255, 255, 0.9)";
+
+#[derive(Clone, Copy, PartialEq)]
+enum TimeOfDay {
+    Night,
+    Sunrise,
+    Day,
+}
+
+impl TimeOfDay {
+    const fn brightness_range(self) -> (f32, f32) {
+        match self {
+            Self::Night => (0.0, 0.5),
+            Self::Sunrise => (0.5, 0.65),
+            Self::Day => (0.65, 1.0),
+        }
+    }
+}
 
 const fn like_color(state: LikedState) -> Option<&'static str> {
     match state {
@@ -46,6 +64,10 @@ pub fn app() -> Element {
         document::Title { "Wallpapy" }
         document::Meta { name: "darkreader-lock" }
         document::Link { rel: "icon", href: asset!("/assets/icon.svg") }
+        document::Link {
+            rel: "stylesheet",
+            href: "https://fonts.googleapis.com/css2?family=Inter:wght@300..700&display=swap",
+        }
         document::Script {
             // Dioxus SSR renders textarea value as an HTML attribute, which browsers ignore for
             // display — only the DOM `.value` property is shown. This copies the attribute to the
@@ -68,10 +90,17 @@ pub fn app() -> Element {
 
                 body {{
                     color: white;
-                    font-family: sans-serif;
-                    font-size: 14px;
+                    font-family: 'Inter', sans-serif;
+                    font-size: 15px;
+                    font-weight: 700;
                     min-height: 100vh;
                     user-select: none;
+                }}
+
+                *, input, textarea, button {{
+                    font-family: inherit;
+                    font-size: inherit;
+                    font-weight: inherit;
                 }}
             "#
         }
@@ -86,6 +115,7 @@ pub fn app() -> Element {
             z_index: "-1",
             filter: "blur(40px) brightness(0.8)",
             transform: "scale(1.02)",
+            will_change: "transform",
         }
         div { GalleryPage {} }
     }
@@ -96,12 +126,23 @@ fn GalleryPage() -> Element {
     let mut styles_action = use_action(action_styles);
     let mut data = use_server_future(load_gallery_data)?;
     let mut expanded_id: Signal<Option<Uuid>> = use_signal(|| None);
+    let like_filter: Signal<Option<LikedState>> = use_signal(|| None);
+    let time_filter: Signal<Option<TimeOfDay>> = use_signal(|| None);
 
     let Some(Ok(gallery)) = data() else {
         return rsx! {
             p { "Loading..." }
         };
     };
+
+    let items = gallery.items.into_iter().filter(|w| {
+        let like_ok = like_filter().is_none_or(|f| w.liked_state == f);
+        let time_ok = time_filter().is_none_or(|f| {
+            let (lo, hi) = f.brightness_range();
+            w.brightness >= lo && w.brightness <= hi
+        });
+        like_ok && time_ok
+    });
 
     rsx! {
         div {
@@ -134,7 +175,7 @@ fn GalleryPage() -> Element {
                 grid_template_columns: "repeat(auto-fill, minmax(360px, 1fr))",
                 gap: "20px",
                 padding: "20px",
-                for w in gallery.items {
+                for w in items {
                     WallpaperCard { key: "{w.id}", w, expanded_id }
                 }
             }
@@ -150,6 +191,8 @@ fn GalleryPage() -> Element {
                 gap: "10px",
 
                 EventsPanel { on_image_received: move || data.restart() }
+
+                FilterBar { like_filter, time_filter }
 
                 div {
                     display: "flex",
@@ -175,6 +218,103 @@ fn GalleryPage() -> Element {
                     }
                     GenerateButton {}
                 }
+            }
+        }
+    }
+}
+
+#[component]
+fn FilterBar(
+    mut like_filter: Signal<Option<LikedState>>,
+    mut time_filter: Signal<Option<TimeOfDay>>,
+) -> Element {
+    rsx! {
+        div {
+            display: "flex",
+            gap: "6px",
+            padding: "8px 12px",
+            background: "rgba(255, 255, 255, 0.2)",
+            backdrop_filter: "blur(20px)",
+            border_radius: "12px",
+            border: "1px solid rgba(255, 255, 255, 0.3)",
+            box_shadow: "0 8px 32px rgba(0, 0, 0, 0.3)",
+            align_items: "center",
+
+            IconButton {
+                color: (like_filter() == Some(LikedState::Loved)).then_some(FILTER_ACTIVE_COLOR),
+                icon: fa_solid_icons::FaHeart,
+                onclick: move |_| {
+                    like_filter
+                        .set(
+                            (like_filter() != Some(LikedState::Loved)).then_some(LikedState::Loved),
+                        );
+                },
+            }
+            IconButton {
+                color: (like_filter() == Some(LikedState::Liked)).then_some(FILTER_ACTIVE_COLOR),
+                icon: fa_solid_icons::FaThumbsUp,
+                onclick: move |_| {
+                    like_filter
+                        .set(
+                            (like_filter() != Some(LikedState::Liked)).then_some(LikedState::Liked),
+                        );
+                },
+            }
+            IconButton {
+                color: (like_filter() == Some(LikedState::Neutral)).then_some(FILTER_ACTIVE_COLOR),
+                icon: fa_solid_icons::FaMinus,
+                onclick: move |_| {
+                    like_filter
+                        .set(
+                            (like_filter() != Some(LikedState::Neutral))
+                                .then_some(LikedState::Neutral),
+                        );
+                },
+            }
+            IconButton {
+                color: (like_filter() == Some(LikedState::Disliked)).then_some(FILTER_ACTIVE_COLOR),
+                icon: fa_solid_icons::FaThumbsDown,
+                onclick: move |_| {
+                    like_filter
+                        .set(
+                            (like_filter() != Some(LikedState::Disliked))
+                                .then_some(LikedState::Disliked),
+                        );
+                },
+            }
+
+            div {
+                width: "1px",
+                align_self: "stretch",
+                margin: "2px 2px",
+                background: "rgba(255, 255, 255, 0.3)",
+            }
+
+            IconButton {
+                color: (time_filter() == Some(TimeOfDay::Night)).then_some(FILTER_ACTIVE_COLOR),
+                icon: fa_solid_icons::FaMoon,
+                onclick: move |_| {
+                    time_filter
+                        .set((time_filter() != Some(TimeOfDay::Night)).then_some(TimeOfDay::Night));
+                },
+            }
+            IconButton {
+                color: (time_filter() == Some(TimeOfDay::Sunrise)).then_some(FILTER_ACTIVE_COLOR),
+                icon: fa_solid_icons::FaCloudSun,
+                onclick: move |_| {
+                    time_filter
+                        .set(
+                            (time_filter() != Some(TimeOfDay::Sunrise)).then_some(TimeOfDay::Sunrise),
+                        );
+                },
+            }
+            IconButton {
+                color: (time_filter() == Some(TimeOfDay::Day)).then_some(FILTER_ACTIVE_COLOR),
+                icon: fa_solid_icons::FaSun,
+                onclick: move |_| {
+                    time_filter
+                        .set((time_filter() != Some(TimeOfDay::Day)).then_some(TimeOfDay::Day));
+                },
             }
         }
     }
@@ -208,7 +348,7 @@ fn GenerateButton() -> Element {
                 color: "white",
                 cursor: "pointer",
                 font_size: "14px",
-                font_weight: "bolder",
+                font_weight: "900",
                 background: "rgba(80, 140, 90)",
                 onmousedown: move |_| pressed.set(true),
                 onmouseup: move |_| pressed.set(false),
@@ -220,7 +360,7 @@ fn GenerateButton() -> Element {
                 "Generate"
             }
             input {
-                style: "width: 100%; border-radius: 0 0 8px 8px; background: rgba(100, 160, 110); border: none; outline: none; color: white; font-size: 13px; padding: 8px 10px; text-align: center;",
+                style: "width: 100%; border-radius: 0 0 8px 8px; background: rgba(100, 160, 110); border: none; outline: none; color: white; padding: 8px 10px; text-align: center;",
                 placeholder: "Custom prompt...",
                 value: prompt(),
                 oninput: move |e| prompt.set(e.value()),
@@ -295,8 +435,6 @@ fn GenerationEventView(event: GenerationEvent) -> Element {
             background: "rgba(10, 10, 10, 0.4)",
             backdrop_filter: "blur(10px)",
             border_radius: "8px",
-            font_size: "12px",
-            font_weight: "bold",
             color: "white",
             white_space: "nowrap",
             box_shadow: "0 4px 12px rgba(0, 0, 0, 0.1)",
@@ -387,6 +525,7 @@ fn WallpaperCard(w: WallpaperData, mut expanded_id: Signal<Option<Uuid>>) -> Ele
             width: pos_width,
             z_index: if is_active { "499" } else { "auto" },
             transition: if is_active && (open_anim() || is_closing()) { "top 0.4s cubic-bezier(0.33, 1, 0.68, 1), left 0.4s cubic-bezier(0.33, 1, 0.68, 1), width 0.4s cubic-bezier(0.33, 1, 0.68, 1), box-shadow 0.4s ease" } else { "box-shadow 0.4s cubic-bezier(0.33, 1, 0.68, 1)" },
+            will_change: if is_active && (open_anim() || is_closing()) { "top, left, width" } else { "auto" },
             box_shadow: if is_active { "0 24px 80px rgba(0, 0, 0, 0.8)" } else if hovered() { "0 0 20px 4px rgba(20, 20, 20, 0.6)" } else { "0 0 12px 4px rgba(20, 20, 20, 0.4)" },
 
             div {
@@ -560,12 +699,10 @@ fn GhostInput(
             display: "block",
             width: "100%",
             rows: if single_line { "1" } else { "3" },
-            font_size: "11px",
-            font_weight: "bold",
+            font_size: "0.8em",
             padding: "8px 20px",
             color: "black",
             background: format!("rgba(240, 240, 240, {})", if focused() { "0.7" } else { "0.3" }),
-            backdrop_filter: "blur(20px)",
             border: "none",
             outline: "none",
             placeholder,
@@ -590,8 +727,7 @@ fn Pill(
             padding: "6px 10px",
             border_radius: "12px",
             backdrop_filter: "blur(8px)",
-            font_size: "11px",
-            font_weight: "bold",
+            font_size: "0.8em",
             background: format!("rgba({}, {OVERLAY_OPACITY})", color.unwrap_or(NEUTRAL_COLOR)),
             color: OVERLAY_TEXT_COLOR,
             onclick: move |e| {
@@ -619,7 +755,6 @@ fn IconButton<T: IconShape + Clone + PartialEq + 'static>(
             width: "26px",
             height: "26px",
             border_radius: "20px",
-            backdrop_filter: "blur(8px)",
             border: "none",
             display: "flex",
             align_items: "center",
