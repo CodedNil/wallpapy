@@ -32,6 +32,7 @@ async fn server_run() {
 
     #[cfg(debug_assertions)]
     dotenvy::dotenv().ok();
+    dioxus::logger::initialize_default();
     std::fs::create_dir_all(&*database::WALLPAPERS_DIR).unwrap();
     tokio::spawn(routing::start_server());
 
