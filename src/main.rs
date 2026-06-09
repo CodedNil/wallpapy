@@ -32,7 +32,12 @@ async fn server_run() {
 
     #[cfg(debug_assertions)]
     dotenvy::dotenv().ok();
-    dioxus::logger::initialize_default();
+
+    if !tracing::dispatcher::has_been_set() {
+        dioxus::logger::init(tracing::Level::INFO).unwrap();
+    }
+
+    database::init().await.unwrap();
     std::fs::create_dir_all(&*database::WALLPAPERS_DIR).unwrap();
     tokio::spawn(routing::start_server());
 

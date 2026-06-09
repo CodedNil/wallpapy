@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use strum::{Display, EnumString};
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
@@ -23,15 +23,13 @@ pub struct ImageFile {
     pub height: u32,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct PromptData {
-    /// The prompt to send to the image generator, aim for 14 words, max 30 words
     pub prompt: String,
-    /// A concise version of the prompt, only including the image description not style, aim for 6 words, max 18 words
     pub shortened_prompt: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq, Display, EnumString)]
 pub enum LikedState {
     Loved,
     Liked,

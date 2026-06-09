@@ -1,11 +1,9 @@
 use crate::common::{GenerationEvent, GenerationStage, LikedState, WallpaperData};
 use crate::server_functions::{
-    action_comment, action_delete, action_generate, action_like, action_styles, load_gallery_data,
-    stream_generation_events,
+    action_comment, action_generate, action_like, load_gallery_data, stream_generation_events,
 };
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
-use dioxus_free_icons::{Icon, IconShape, icons::fa_solid_icons};
 use std::collections::HashSet;
 use uuid::Uuid;
 
@@ -47,7 +45,7 @@ fn format_age(dt: DateTime<Utc>) -> String {
     let diff = Utc::now().signed_duration_since(dt);
     let plural = |n: i64, unit: &str| format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" });
     if diff.num_weeks() >= 1 || diff.num_milliseconds() < 0 {
-        dt.format("%d/%m/%Y %I%P").to_string()
+        dt.format("%d/%m/%Y %-I%P").to_string()
     } else if diff.num_days() >= 1 {
         plural(diff.num_days(), "day")
     } else if diff.num_hours() >= 1 {
@@ -121,9 +119,14 @@ pub fn app() -> Element {
     }
 }
 
+macro_rules! icon_svg {
+    ($name:literal) => {
+        include_str!(concat!("../assets/icons/", $name, ".svg"))
+    };
+}
+
 #[component]
 fn GalleryPage() -> Element {
-    let mut styles_action = use_action(action_styles);
     let mut data = use_server_future(load_gallery_data)?;
     let mut expanded_id: Signal<Option<Uuid>> = use_signal(|| None);
     let like_filter: Signal<Option<LikedState>> = use_signal(|| None);
@@ -135,7 +138,7 @@ fn GalleryPage() -> Element {
         };
     };
 
-    let items = gallery.items.into_iter().filter(|w| {
+    let items = gallery.into_iter().filter(|w| {
         let like_ok = like_filter().is_none_or(|f| w.liked_state == f);
         let time_ok = time_filter().is_none_or(|f| {
             let (lo, hi) = f.brightness_range();
@@ -194,30 +197,7 @@ fn GalleryPage() -> Element {
 
                 FilterBar { like_filter, time_filter }
 
-                div {
-                    display: "flex",
-                    gap: "16px",
-                    padding: "12px",
-                    background: "rgba(255, 255, 255, 0.2)",
-                    backdrop_filter: "blur(20px)",
-                    border_radius: "16px",
-                    border: "1px solid rgba(255, 255, 255, 0.3)",
-                    align_items: "stretch",
-                    box_shadow: "0 8px 32px rgba(0, 0, 0, 0.3)",
-
-                    div {
-                        display: "flex",
-                        width: "400px",
-                        border_radius: "16px",
-                        overflow: "hidden",
-                        GhostInput {
-                            value: gallery.style_prompt,
-                            placeholder: "Style prompt...",
-                            oninput: move |val| styles_action.call(val),
-                        }
-                    }
-                    GenerateButton {}
-                }
+                GenerateButton {}
             }
         }
     }
@@ -242,7 +222,7 @@ fn FilterBar(
 
             IconButton {
                 color: (like_filter() == Some(LikedState::Loved)).then_some(FILTER_ACTIVE_COLOR),
-                icon: fa_solid_icons::FaHeart,
+                svg: icon_svg!("sentiment_excited"),
                 onclick: move |_| {
                     like_filter
                         .set(
@@ -252,7 +232,7 @@ fn FilterBar(
             }
             IconButton {
                 color: (like_filter() == Some(LikedState::Liked)).then_some(FILTER_ACTIVE_COLOR),
-                icon: fa_solid_icons::FaThumbsUp,
+                svg: icon_svg!("sentiment_satisfied"),
                 onclick: move |_| {
                     like_filter
                         .set(
@@ -262,7 +242,7 @@ fn FilterBar(
             }
             IconButton {
                 color: (like_filter() == Some(LikedState::Neutral)).then_some(FILTER_ACTIVE_COLOR),
-                icon: fa_solid_icons::FaMinus,
+                svg: icon_svg!("sentiment_neutral"),
                 onclick: move |_| {
                     like_filter
                         .set(
@@ -273,7 +253,7 @@ fn FilterBar(
             }
             IconButton {
                 color: (like_filter() == Some(LikedState::Disliked)).then_some(FILTER_ACTIVE_COLOR),
-                icon: fa_solid_icons::FaThumbsDown,
+                svg: icon_svg!("sentiment_dissatisfied"),
                 onclick: move |_| {
                     like_filter
                         .set(
@@ -292,7 +272,7 @@ fn FilterBar(
 
             IconButton {
                 color: (time_filter() == Some(TimeOfDay::Night)).then_some(FILTER_ACTIVE_COLOR),
-                icon: fa_solid_icons::FaMoon,
+                svg: icon_svg!("bedtime"),
                 onclick: move |_| {
                     time_filter
                         .set((time_filter() != Some(TimeOfDay::Night)).then_some(TimeOfDay::Night));
@@ -300,7 +280,7 @@ fn FilterBar(
             }
             IconButton {
                 color: (time_filter() == Some(TimeOfDay::Sunrise)).then_some(FILTER_ACTIVE_COLOR),
-                icon: fa_solid_icons::FaCloudSun,
+                svg: icon_svg!("wb_twilight"),
                 onclick: move |_| {
                     time_filter
                         .set(
@@ -310,7 +290,7 @@ fn FilterBar(
             }
             IconButton {
                 color: (time_filter() == Some(TimeOfDay::Day)).then_some(FILTER_ACTIVE_COLOR),
-                icon: fa_solid_icons::FaSun,
+                svg: icon_svg!("sunny"),
                 onclick: move |_| {
                     time_filter
                         .set((time_filter() != Some(TimeOfDay::Day)).then_some(TimeOfDay::Day));
@@ -436,7 +416,8 @@ fn GenerationEventView(event: GenerationEvent) -> Element {
             backdrop_filter: "blur(10px)",
             border_radius: "8px",
             color: "white",
-            white_space: "nowrap",
+            max_width: "40vw",
+            overflow_wrap: "break-word",
             box_shadow: "0 4px 12px rgba(0, 0, 0, 0.1)",
             "{text}"
         }
@@ -446,7 +427,6 @@ fn GenerationEventView(event: GenerationEvent) -> Element {
 #[component]
 fn WallpaperCard(w: WallpaperData, mut expanded_id: Signal<Option<Uuid>>) -> Element {
     let mut like_action = use_action(action_like);
-    let mut delete_action = use_action(action_delete);
     let mut comment_action = use_action(action_comment);
 
     let mut deleted = use_signal(|| false);
@@ -606,7 +586,7 @@ fn WallpaperCard(w: WallpaperData, mut expanded_id: Signal<Option<Uuid>>) -> Ele
                             pointer_events: "auto",
                             IconButton {
                                 color: like_color(liked()).filter(|_| liked() == LikedState::Loved),
-                                icon: fa_solid_icons::FaHeart,
+                                svg: icon_svg!("sentiment_excited"),
                                 onclick: move |e: MouseEvent| {
                                     e.stop_propagation();
                                     update_like(LikedState::Loved);
@@ -614,7 +594,7 @@ fn WallpaperCard(w: WallpaperData, mut expanded_id: Signal<Option<Uuid>>) -> Ele
                             }
                             IconButton {
                                 color: like_color(liked()).filter(|_| liked() == LikedState::Liked),
-                                icon: fa_solid_icons::FaThumbsUp,
+                                svg: icon_svg!("sentiment_satisfied"),
                                 onclick: move |e: MouseEvent| {
                                     e.stop_propagation();
                                     update_like(LikedState::Liked);
@@ -622,19 +602,11 @@ fn WallpaperCard(w: WallpaperData, mut expanded_id: Signal<Option<Uuid>>) -> Ele
                             }
                             IconButton {
                                 color: like_color(liked()).filter(|_| liked() == LikedState::Disliked),
-                                icon: fa_solid_icons::FaThumbsDown,
-                                onclick: move |e: MouseEvent| {
-                                    e.stop_propagation();
-                                    update_like(LikedState::Disliked);
-                                },
-                            }
-                            IconButton {
-                                icon: fa_solid_icons::FaTrash,
+                                svg: icon_svg!("sentiment_dissatisfied"),
                                 onclick: move |e: MouseEvent| {
                                     e.stop_propagation();
                                     deleted.set(true);
-                                    expanded_id.set(None);
-                                    delete_action.call(w.id);
+                                    update_like(LikedState::Disliked);
                                 },
                             }
                         }
@@ -672,7 +644,7 @@ fn WallpaperCard(w: WallpaperData, mut expanded_id: Signal<Option<Uuid>>) -> Ele
                 value: comment(),
                 placeholder: "Add a note...",
                 single_line: true,
-                maxlength: 54,
+                maxlength: 200,
                 oninput: move |val: String| {
                     let saved = (!val.trim().is_empty()).then(|| val.clone());
                     comment.set(val);
@@ -743,13 +715,20 @@ fn Pill(
 }
 
 #[component]
-fn IconButton<T: IconShape + Clone + PartialEq + 'static>(
+fn IconButton(
     color: Option<&'static str>,
-    icon: T,
+    svg: &'static str,
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
     let mut hovered = use_signal(|| false);
     let mut pressed = use_signal(|| false);
+
+    let svg = svg.replacen(
+        "<svg ",
+        "<svg style=\"fill:currentColor;width:100%;height:100%;display:block;\" ",
+        1,
+    );
+
     rsx! {
         button {
             width: "26px",
@@ -774,11 +753,10 @@ fn IconButton<T: IconShape + Clone + PartialEq + 'static>(
             onmousedown: move |_| pressed.set(true),
             onmouseup: move |_| pressed.set(false),
             onclick: move |evt| onclick.call(evt),
-            Icon {
-                width: 12,
-                height: 12,
-                fill: "currentColor",
-                icon,
+            span {
+                style: "width: 14px; height: 14px; display: block;",
+                aria_hidden: "true",
+                dangerous_inner_html: "{svg}",
             }
         }
     }

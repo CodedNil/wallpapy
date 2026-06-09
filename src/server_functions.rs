@@ -1,40 +1,22 @@
-use crate::common::{
-    LikedState, WallpaperData, {GenerationEvent, GenerationStage},
-};
-use dioxus::fullstack::payloads::ServerEvents;
-use dioxus::prelude::*;
-use serde::{Deserialize, Serialize};
+use crate::common::{GenerationEvent, GenerationStage, LikedState, WallpaperData};
+use dioxus::{fullstack::ServerEvents, prelude::*};
 use std::time::Duration;
 use uuid::Uuid;
 
 #[cfg(feature = "server")]
 use crate::{
-    database::{WALLPAPERS_DIR, read_database, with_db},
+    database,
     image::generate_wallpaper_impl,
     routing::{EVENTS_SENDER, GENERATION_EVENTS, remove_generation_event, update_generation_event},
 };
 #[cfg(feature = "server")]
-use axum::http::StatusCode;
-#[cfg(feature = "server")]
 use tokio::sync::broadcast;
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct GalleryPageData {
-    pub items: Vec<WallpaperData>,
-    pub style_prompt: String,
-}
-
 #[get("/api/gallery")]
-pub async fn load_gallery_data() -> Result<GalleryPageData, ServerFnError> {
-    let db = read_database()
+pub async fn load_gallery_data() -> Result<Vec<WallpaperData>, ServerFnError> {
+    database::get_gallery_wallpapers()
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
-    let mut items: Vec<WallpaperData> = db.wallpapers.values().cloned().collect();
-    items.sort_by(|a, b| b.datetime.cmp(&a.datetime));
-    Ok(GalleryPageData {
-        items,
-        style_prompt: db.style,
-    })
+        .map_err(|e| ServerFnError::new(e.to_string()))
 }
 
 #[get("/api/events")]
@@ -82,61 +64,39 @@ pub async fn action_generate(prompt: Option<String>) -> Result<(), ServerFnError
 
 #[post("/api/wallpapers/{id}/like")]
 pub async fn action_like(id: Uuid, state: LikedState) -> Result<(), ServerFnError> {
-    with_db(|db| {
-        let Some(wallpaper) = db.wallpapers.get_mut(&id) else {
-            return Err(StatusCode::NOT_FOUND);
-        };
-        wallpaper.liked_state = if wallpaper.liked_state == state {
-            LikedState::Neutral
-        } else {
-            state
-        };
-        Ok(())
-    })
-    .await
-    .map_err(|e| ServerFnError::new(format!("like failed: {e:?}")))
-}
+    let current = database::get_liked_state(id)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?
+        .ok_or_else(|| ServerFnError::new("wallpaper not found".to_string()))?;
 
-#[delete("/api/wallpapers/{id}")]
-pub async fn action_delete(id: Uuid) -> Result<(), ServerFnError> {
-    let file_to_remove = with_db(|db| {
-        db.wallpapers
-            .remove(&id)
-            .map(|w| w.image_file.file_name)
-            .ok_or(StatusCode::NOT_FOUND)
-    })
-    .await
-    .map_err(|status| ServerFnError::new(format!("Database error: {status}")))?;
+    let new_state = if current == state {
+        LikedState::Neutral
+    } else {
+        state
+    };
 
-    let file_path = WALLPAPERS_DIR.join(file_to_remove);
-    if file_path.exists() {
-        tokio::fs::remove_file(file_path)
+    if new_state == LikedState::Disliked {
+        database::dislike_and_remove_file(id)
             .await
-            .map_err(|e| ServerFnError::new(format!("File removal failed: {e}")))?;
+            .map_err(|e| ServerFnError::new(format!("dislike failed: {e:?}")))?;
+    } else {
+        database::update_liked_state(id, new_state)
+            .await
+            .map_err(|e| ServerFnError::new(format!("like failed: {e:?}")))?;
     }
+
     Ok(())
 }
 
 #[post("/api/wallpapers/{id}/comment")]
 pub async fn action_comment(id: Uuid, comment: Option<String>) -> Result<(), ServerFnError> {
-    with_db(|db| {
-        let Some(wallpaper) = db.wallpapers.get_mut(&id) else {
-            tracing::error!("set_image_comment: wallpaper not found {id}");
-            return Err(StatusCode::NOT_FOUND);
-        };
-        wallpaper.comment = comment.filter(|s| !s.trim().is_empty());
-        Ok(())
-    })
-    .await
-    .map_err(|e| ServerFnError::new(format!("comment failed: {e:?}")))
-}
-
-#[post("/api/styles")]
-pub async fn action_styles(style_prompt: String) -> Result<(), ServerFnError> {
-    with_db(|db| {
-        db.style = style_prompt;
-        Ok(())
-    })
-    .await
-    .map_err(|e| ServerFnError::new(format!("styles failed: {e:?}")))
+    let comment = comment.filter(|s| !s.trim().is_empty());
+    let existed = database::update_comment(id, comment.as_deref())
+        .await
+        .map_err(|e| ServerFnError::new(format!("comment failed: {e:?}")))?;
+    if !existed {
+        tracing::error!("set_image_comment: wallpaper not found {id}");
+        return Err(ServerFnError::new("wallpaper not found".to_string()));
+    }
+    Ok(())
 }

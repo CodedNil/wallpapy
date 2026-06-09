@@ -1,7 +1,6 @@
 use crate::{
     common::{GenerationStage, ImageFile, LikedState, WallpaperData},
-    database::{WALLPAPERS_DIR, read_database, write_database},
-    gpt, routing,
+    database, gpt, routing,
 };
 use anyhow::{Result, anyhow};
 use axum::{
@@ -32,7 +31,7 @@ const TIMEOUT: u64 = 360;
 static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
 
 async fn serve_file(file_name: &str) -> Result<(StatusCode, HeaderMap, Vec<u8>), StatusCode> {
-    let path = WALLPAPERS_DIR.join(file_name);
+    let path = database::WALLPAPERS_DIR.join(file_name);
     let data = fs::read(&path).await.map_err(|e| {
         error!("Failed to read image file {file_name:?}: {e:?}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -49,11 +48,11 @@ async fn serve_file(file_name: &str) -> Result<(StatusCode, HeaderMap, Vec<u8>),
 }
 
 pub async fn latest() -> Result<impl IntoResponse, StatusCode> {
-    let db = read_database().await.map_err(|e| {
+    let Some(wallpaper) = database::get_latest_wallpaper().await.map_err(|e| {
         error!("db read error: {e:?}");
         StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-    let Some(wallpaper) = db.wallpapers.into_values().max_by_key(|w| w.datetime) else {
+    })?
+    else {
         error!("No wallpapers found");
         return Err(StatusCode::NOT_FOUND);
     };
@@ -61,17 +60,13 @@ pub async fn latest() -> Result<impl IntoResponse, StatusCode> {
 }
 
 pub async fn favourites() -> Result<impl IntoResponse, StatusCode> {
-    let db = read_database().await.map_err(|e| {
-        error!("db read error: {e:?}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    let wallpapers = db
-        .wallpapers
-        .into_values()
-        .filter(|w| matches!(w.liked_state, LikedState::Liked))
-        .collect::<Vec<_>>()
-        .tap_mut(|v| v.sort_by_key(|w| w.id));
+    let wallpapers =
+        database::get_wallpapers_by_liked_state(&[LikedState::Liked, LikedState::Loved])
+            .await
+            .map_err(|e| {
+                error!("db read error: {e:?}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
 
     if wallpapers.is_empty() {
         return Err(StatusCode::NOT_FOUND);
@@ -86,10 +81,13 @@ pub async fn favourites() -> Result<impl IntoResponse, StatusCode> {
 }
 
 pub async fn smartget() -> Result<impl IntoResponse, StatusCode> {
-    let db = read_database().await.map_err(|e| {
-        error!("db read error: {e:?}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let wallpapers =
+        database::get_wallpapers_by_liked_state(&[LikedState::Liked, LikedState::Loved])
+            .await
+            .map_err(|e| {
+                error!("db read error: {e:?}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
     let now = Utc::now();
     let brightness_range = match now.hour() {
         7..=9 | 17..=21 => (0.5, 0.65),
@@ -97,23 +95,16 @@ pub async fn smartget() -> Result<impl IntoResponse, StatusCode> {
         _ => (0.0, 0.5),
     };
 
-    let wallpapers = db
-        .wallpapers
-        .into_values()
-        .filter(|w| matches!(w.liked_state, LikedState::Liked | LikedState::Loved))
-        .collect::<Vec<_>>()
-        .tap_mut(|v| {
-            // If we have a wallpaper with correct brightness range, filter down to just those
-            let has_match = v
-                .iter()
-                .any(|w| w.brightness >= brightness_range.0 && w.brightness <= brightness_range.1);
-            if has_match {
-                v.retain(|w| {
-                    w.brightness >= brightness_range.0 && w.brightness <= brightness_range.1
-                });
-            }
-            v.sort_by_key(|w| w.id);
-        });
+    let wallpapers = wallpapers.into_iter().collect::<Vec<_>>().tap_mut(|v| {
+        // If we have a wallpaper with correct brightness range, filter down to just those
+        let has_match = v
+            .iter()
+            .any(|w| w.brightness >= brightness_range.0 && w.brightness <= brightness_range.1);
+        if has_match {
+            v.retain(|w| w.brightness >= brightness_range.0 && w.brightness <= brightness_range.1);
+        }
+        v.sort_by_key(|w| w.id);
+    });
 
     if wallpapers.is_empty() {
         return Err(StatusCode::NOT_FOUND);
@@ -143,7 +134,7 @@ pub async fn generate_wallpaper_impl(message: Option<String>, id: Uuid) -> Resul
     routing::update_generation_event(
         id,
         GenerationStage::ReceivedPrompt {
-            prompt: prompt_data.shortened_prompt.clone(),
+            prompt: prompt_data.prompt.clone(),
         },
     )
     .await;
@@ -154,7 +145,11 @@ pub async fn generate_wallpaper_impl(message: Option<String>, id: Uuid) -> Resul
     let datetime_str = datetime.to_rfc3339();
 
     let file_name = format!("{datetime_str}.avif");
-    fs::write(WALLPAPERS_DIR.join(&file_name), encode_avif(&image, 4, 80)?).await?;
+    fs::write(
+        database::WALLPAPERS_DIR.join(&file_name),
+        encode_avif(&image, 4, 80)?,
+    )
+    .await?;
     let image_file = ImageFile {
         file_name,
         width: image.width(),
@@ -172,9 +167,7 @@ pub async fn generate_wallpaper_impl(message: Option<String>, id: Uuid) -> Resul
         comment: None,
     };
 
-    let mut database = read_database().await?;
-    database.wallpapers.insert(id, wallpaper);
-    write_database(&database).await?;
+    database::insert_wallpaper(&wallpaper).await?;
     routing::update_generation_event(id, GenerationStage::ReceivedImage).await;
 
     tokio::time::sleep(Duration::from_secs(5)).await;

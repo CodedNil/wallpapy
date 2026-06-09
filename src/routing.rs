@@ -1,6 +1,6 @@
 use crate::{
     common::{GenerationEvent, GenerationStage},
-    database::read_database,
+    database,
     image::generate_wallpaper_impl,
 };
 use chrono::{Duration, Utc};
@@ -47,29 +47,28 @@ pub async fn remove_generation_event(id: Uuid) {
     let _ = EVENTS_SENDER.send(snapshot);
 }
 
-const NEW_WALLPAPER_INTERVAL: Duration = Duration::hours(6);
+const NEW_WALLPAPER_INTERVAL: Duration = Duration::hours(12);
+
+async fn try_generate() {
+    let id = Uuid::new_v4();
+    if let Err(e) = generate_wallpaper_impl(None, id).await {
+        tracing::error!("generate failed: {e:?}");
+        remove_generation_event(id).await;
+    }
+}
 
 pub async fn start_server() {
     loop {
-        match read_database().await {
-            Ok(database) => {
-                let cur_time = Utc::now();
-                let latest_time = database
-                    .wallpapers
-                    .values()
-                    .max_by_key(|w| w.datetime)
-                    .map_or(cur_time, |w| w.datetime);
-
-                if cur_time - latest_time > NEW_WALLPAPER_INTERVAL {
-                    let id = Uuid::new_v4();
-                    if let Err(e) = generate_wallpaper_impl(None, id).await {
-                        tracing::error!("generate failed: {e:?}");
-                        remove_generation_event(id).await;
-                    }
+        match database::get_latest_datetime().await {
+            Ok(Some(latest_time)) => {
+                if Utc::now() - latest_time > NEW_WALLPAPER_INTERVAL {
+                    try_generate().await;
                 }
             }
+            Ok(None) => try_generate().await,
             Err(e) => error!("{e:?}"),
         }
-        tokio::time::sleep(tokio::time::Duration::from_secs(60 * 10)).await;
+
+        tokio::time::sleep(tokio::time::Duration::from_mins(10)).await;
     }
 }
