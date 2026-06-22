@@ -9,7 +9,7 @@ dioxus = { version = "0.7.9", features = ["fullstack"] }
 tracing = "0.1.44"
 anyhow = "1.0.102"
 serde = { version = "1.0.228", features = ["derive"] }
-uuid = { version = "1.23.2", features = ["v4", "fast-rng", "serde", "js"] }
+uuid = { version = "1.23.3", features = ["v4", "fast-rng", "serde", "js"] }
 chrono = { version = "0.4.45", features = ["serde"] }
 gloo-timers = { version = "0.4.0", features = ["futures"] }
 tap = "1.0.1"
@@ -41,11 +41,10 @@ mime_guess = "2.0.5"
 reqwest = { version = "0.13.4", features = ["json"] }
 tokio = { version = "1.52.3", features = ["full"] }
 axum = { version = "0.8.9", features = ["http1", "tokio"] }
-tower-http = { version = "0.6.11", features = [
+tower-http = { version = "0.7.0", features = [
     "fs",
-    "async-compression",
-    "compression-deflate",
-    "compression-gzip",
+    "compression-full",
+    "decompression-full",
 ] }
 image = { version = "0.25.10", default-features = false, features = [
     "jpeg",
@@ -53,6 +52,7 @@ image = { version = "0.25.10", default-features = false, features = [
     "avif",
     "rayon",
 ] }
+itertools = "0.15.0"
 
 [features]
 default = []

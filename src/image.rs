@@ -1,5 +1,5 @@
 use crate::{
-    common::{GenerationStage, ImageFile, LikedState, WallpaperData},
+    common::{GenerationStage, LikedState, WallpaperData},
     database, gpt, routing,
 };
 use anyhow::{Result, anyhow};
@@ -9,9 +9,9 @@ use axum::{
 };
 use chrono::{Timelike, Utc};
 use image::{
-    DynamicImage, GenericImageView, ImageReader, Pixel, codecs::avif::AvifEncoder,
-    imageops::FilterType,
+    DynamicImage, GenericImageView, ImageReader, codecs::avif::AvifEncoder, imageops::FilterType,
 };
+use itertools::Itertools;
 use reqwest::Client;
 use serde_json::json;
 use std::{
@@ -56,7 +56,7 @@ pub async fn latest() -> Result<impl IntoResponse, StatusCode> {
         error!("No wallpapers found");
         return Err(StatusCode::NOT_FOUND);
     };
-    serve_file(&wallpaper.image_file.file_name).await
+    serve_file(&wallpaper.image_file).await
 }
 
 pub async fn favourites() -> Result<impl IntoResponse, StatusCode> {
@@ -77,7 +77,7 @@ pub async fn favourites() -> Result<impl IntoResponse, StatusCode> {
     let index =
         (DefaultHasher::new().tap_mut(|h| hour_seed.hash(h)).finish() as usize) % wallpapers.len();
 
-    serve_file(&wallpapers[index].image_file.file_name).await
+    serve_file(&wallpapers[index].image_file).await
 }
 
 pub async fn smartget() -> Result<impl IntoResponse, StatusCode> {
@@ -97,11 +97,13 @@ pub async fn smartget() -> Result<impl IntoResponse, StatusCode> {
 
     let wallpapers = wallpapers.into_iter().collect::<Vec<_>>().tap_mut(|v| {
         // If we have a wallpaper with correct brightness range, filter down to just those
-        let has_match = v
-            .iter()
-            .any(|w| w.brightness >= brightness_range.0 && w.brightness <= brightness_range.1);
+        let has_match = v.iter().any(|w| {
+            w.image_brightness >= brightness_range.0 && w.image_brightness <= brightness_range.1
+        });
         if has_match {
-            v.retain(|w| w.brightness >= brightness_range.0 && w.brightness <= brightness_range.1);
+            v.retain(|w| {
+                w.image_brightness >= brightness_range.0 && w.image_brightness <= brightness_range.1
+            });
         }
         v.sort_by_key(|w| w.id);
     });
@@ -115,7 +117,7 @@ pub async fn smartget() -> Result<impl IntoResponse, StatusCode> {
     let index =
         (DefaultHasher::new().tap_mut(|h| hour_seed.hash(h)).finish() as usize) % wallpapers.len();
 
-    serve_file(&wallpapers[index].image_file.file_name).await
+    serve_file(&wallpapers[index].image_file).await
 }
 
 pub async fn generate_wallpaper_impl(message: Option<String>, id: Uuid) -> Result<()> {
@@ -150,24 +152,24 @@ pub async fn generate_wallpaper_impl(message: Option<String>, id: Uuid) -> Resul
         encode_avif(&image, 4, 80)?,
     )
     .await?;
-    let image_file = ImageFile {
-        file_name,
-        width: image.width(),
-        height: image.height(),
-    };
 
     let small_image = image.resize_to_fill(640, 360, FilterType::Lanczos3);
     let wallpaper = WallpaperData {
         id,
         datetime,
-        prompt_data,
-        image_file,
-        brightness: top_20_percent_brightness(&small_image),
+
+        prompt: prompt_data.prompt,
+        shortened_prompt: prompt_data.shortened_prompt,
+        image_file: file_name,
+        image_width: image.width(),
+        image_height: image.height(),
+        image_brightness: top_20_percent_brightness(&small_image),
+
         liked_state: LikedState::Neutral,
         comment: None,
     };
 
-    database::insert_wallpaper(&wallpaper).await?;
+    database::insert_wallpaper(wallpaper).await?;
     routing::update_generation_event(id, GenerationStage::ReceivedImage).await;
 
     tokio::time::sleep(Duration::from_secs(5)).await;
@@ -185,10 +187,13 @@ fn encode_avif(img: &DynamicImage, speed: u8, quality: u8) -> Result<Vec<u8>> {
 }
 
 fn top_20_percent_brightness(img: &DynamicImage) -> f32 {
-    let brightness_values: Vec<f32> = img
+    let sample_rate = 25;
+
+    let mut sampled_brightness = img
         .pixels()
+        .step_by(sample_rate)
         .map(|(_, _, pixel)| {
-            let [r, g, b] = pixel.to_rgb().0;
+            let [r, g, b, _] = pixel.0;
             let (r, g, b) = (
                 f32::from(r) / 255.0,
                 f32::from(g) / 255.0,
@@ -196,15 +201,12 @@ fn top_20_percent_brightness(img: &DynamicImage) -> f32 {
             );
             0.114f32.mul_add(b, 0.299f32.mul_add(r, 0.587f32 * g))
         })
-        .collect::<Vec<_>>()
-        .tap_mut(|v| v.sort_unstable_by(f32::total_cmp));
+        .sorted_by(f32::total_cmp);
 
-    if brightness_values.is_empty() {
-        return 0.0;
-    }
-    let len = brightness_values.len();
-    let top_index = ((len as f32) * 0.80).ceil() as usize - 1;
-    brightness_values[top_index.min(len - 1)]
+    // Grab the 80th percentile item from the sorted iterator
+    let target_index = ((sampled_brightness.len() as f32) * 0.80) as usize;
+
+    sampled_brightness.nth(target_index).unwrap_or(0.0)
 }
 
 /// <https://replicate.com/bytedance/seedream-4>

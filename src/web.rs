@@ -142,7 +142,7 @@ fn GalleryPage() -> Element {
         let like_ok = like_filter().is_none_or(|f| w.liked_state == f);
         let time_ok = time_filter().is_none_or(|f| {
             let (lo, hi) = f.brightness_range();
-            w.brightness >= lo && w.brightness <= hi
+            w.image_brightness >= lo && w.image_brightness <= hi
         });
         like_ok && time_ok
     });
@@ -555,7 +555,7 @@ fn WallpaperCard(w: WallpaperData, mut expanded_id: Signal<Option<Uuid>>) -> Ele
                     display: "block",
                     loading: "lazy",
                     draggable: "false",
-                    src: "/wallpapers/{w.image_file.file_name}",
+                    src: "/wallpapers/{w.image_file}",
                     transition: "transform 0.6s cubic-bezier(0.33, 1, 0.68, 1), filter 0.6s cubic-bezier(0.33, 1, 0.68, 1)",
                     transform: if hovered() && !is_active { "scale(1.1)" } else { "scale(1.01)" },
                     filter: if hovered() && !is_active { "brightness(1.1)" } else { "brightness(1)" },
@@ -620,7 +620,7 @@ fn WallpaperCard(w: WallpaperData, mut expanded_id: Signal<Option<Uuid>>) -> Ele
 
                         Pill {
                             color: like_color(liked()),
-                            text: if is_active { "{w.prompt_data.prompt}" } else { "{w.prompt_data.shortened_prompt}" },
+                            text: if is_active { "{w.prompt}" } else { "{w.shortened_prompt}" },
                             onclick: move |_| {
                                 if let Some(window) = web_sys::window() {
                                     let _ = window
@@ -628,9 +628,9 @@ fn WallpaperCard(w: WallpaperData, mut expanded_id: Signal<Option<Uuid>>) -> Ele
                                         .clipboard()
                                         .write_text(
                                             if is_active {
-                                                &w.prompt_data.prompt
+                                                &w.prompt
                                             } else {
-                                                &w.prompt_data.shortened_prompt
+                                                &w.shortened_prompt
                                             },
                                         );
                                 }

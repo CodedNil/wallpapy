@@ -3,10 +3,10 @@ CREATE TABLE IF NOT EXISTS wallpapers (
     datetime TEXT NOT NULL,
     prompt TEXT NOT NULL,
     shortened_prompt TEXT NOT NULL,
-    file_name TEXT NOT NULL,
-    width INTEGER NOT NULL,
-    height INTEGER NOT NULL,
-    brightness REAL NOT NULL,
-    liked_state TEXT NOT NULL DEFAULT 'Neutral',
+    image_file TEXT,
+    image_width INTEGER,
+    image_height INTEGER,
+    image_brightness REAL,
+    liked_state TEXT NOT NULL,
     comment TEXT
 );

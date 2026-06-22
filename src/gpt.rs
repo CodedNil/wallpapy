@@ -1,13 +1,10 @@
-use crate::{
-    common::{LikedState, PromptData},
-    database,
-};
+use crate::{common::LikedState, database};
 use anyhow::{Result, anyhow};
 use reqwest::{
     Client,
     header::{AUTHORIZATION, CONTENT_TYPE},
 };
-use serde::de::DeserializeOwned;
+use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use std::{env, error::Error, fmt::Write as _, sync::LazyLock};
 use tap::Tap;
@@ -115,7 +112,7 @@ async fn build_context() -> Result<String> {
                 LikedState::Disliked => " [disliked by user]",
                 LikedState::Neutral => "",
             };
-            let mut entry = format!("• {}{}", w.prompt_data.shortened_prompt, feedback);
+            let mut entry = format!("• {}{}", w.shortened_prompt, feedback);
             if let Some(note) = &w.comment {
                 let _ = write!(entry, "  user note: {note}");
             }
@@ -133,6 +130,12 @@ async fn build_context() -> Result<String> {
         .join("\n");
 
     Ok(recent)
+}
+
+#[derive(Deserialize)]
+pub struct PromptData {
+    pub prompt: String,
+    pub shortened_prompt: String,
 }
 
 pub async fn generate(message: Option<String>) -> Result<PromptData> {
