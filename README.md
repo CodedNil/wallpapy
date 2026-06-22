@@ -18,7 +18,7 @@ Your personalised daily wallpaper generator
 
 ## Overview
 
-Wallpapy uses AI models such as Gemini 2.5 Flash to generate prompts for new wallpapers in a style you choose, aiming to give a refreshing variety, and using Seedream 4.0 to generate the images. It provides api calls to fetch your liked images to use in OS extensions that can serve a random wallpaper to you every x hours.
+Wallpapy uses LLMs to generate prompts for new wallpapers in a style you choose, aiming to give a refreshing variety, and then a diffusion model to generate the images. It provides api calls to fetch your liked images to use in OS extensions that can serve a random wallpaper to you every x hours.
 
 ## Features
 
@@ -34,7 +34,7 @@ Wallpapy uses AI models such as Gemini 2.5 Flash to generate prompts for new wal
 2. **Install the WebAssembly Target:** `rustup target add wasm32-unknown-unknown`
 3. **Install wasm-bindgen and wasm-opt for building WASM applications**
 4. **Install [Just](https://github.com/casey/just) for managing build commands:** `cargo install --locked just`
-5. **Create Configuration File:** Copy the `.env-template` to `.env` and fill in your Gemini and Replicate details
+5. **Create Configuration File:** Set `OPENROUTER` environment variable with your OpenRouter API token
 
 ### Build and Run Commands
 - **Run the App in Desktop Mode:** `just`

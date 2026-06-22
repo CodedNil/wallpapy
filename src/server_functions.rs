@@ -48,6 +48,7 @@ pub async fn action_generate(prompt: Option<String>) -> Result<(), ServerFnError
     let prompt = prompt.filter(|p| !p.trim().is_empty());
     let id = Uuid::new_v4();
     if let Err(e) = generate_wallpaper_impl(prompt, id).await {
+        error!("Failed to generate wallpaper: {}", e);
         update_generation_event(
             id,
             GenerationStage::Failed {

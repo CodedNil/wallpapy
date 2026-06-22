@@ -7,6 +7,7 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode},
     response::IntoResponse,
 };
+use base64::{Engine, engine::general_purpose};
 use chrono::{Timelike, Utc};
 use image::{
     DynamicImage, GenericImageView, ImageReader, codecs::avif::AvifEncoder, imageops::FilterType,
@@ -25,8 +26,6 @@ use tap::Tap;
 use tokio::fs;
 use tracing::{error, info};
 use uuid::Uuid;
-
-const TIMEOUT: u64 = 360;
 
 static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
 
@@ -127,8 +126,6 @@ pub async fn generate_wallpaper_impl(message: Option<String>, id: Uuid) -> Resul
 
     let datetime = Utc::now();
     let client = &*HTTP_CLIENT;
-    let api_token =
-        env::var("REPLICATE_API_TOKEN").expect("REPLICATE_API_TOKEN environment variable not set");
 
     let prompt_data = gpt::generate(message).await?;
     info!("Generated prompt: {}", prompt_data.prompt);
@@ -141,11 +138,11 @@ pub async fn generate_wallpaper_impl(message: Option<String>, id: Uuid) -> Resul
     )
     .await;
 
-    let (image_url, image) = image_diffusion(client, &api_token, &prompt_data.prompt).await?;
-    info!("Generated image: {}", &image_url);
+    let image = image_diffusion(client, &prompt_data.prompt).await?;
+    let image = image.resize_to_fill(3840, 2160, FilterType::Lanczos3);
+    info!("Generated image");
 
     let datetime_str = datetime.to_rfc3339();
-
     let file_name = format!("{datetime_str}.avif");
     fs::write(
         database::WALLPAPERS_DIR.join(&file_name),
@@ -209,81 +206,49 @@ fn top_20_percent_brightness(img: &DynamicImage) -> f32 {
     sampled_brightness.nth(target_index).unwrap_or(0.0)
 }
 
-/// <https://replicate.com/bytedance/seedream-4>
-async fn image_diffusion(
-    client: &Client,
-    api_token: &str,
-    prompt: &str,
-) -> Result<(String, DynamicImage)> {
-    let result_url = replicate_request_prediction(
-        client,
-        api_token,
-        "https://api.replicate.com/v1/models/bytedance/seedream-4/predictions",
-        &json!({
-            "input": {
-                "prompt": prompt,
-                "size": "custom",
-                "width": 3840,
-                "height": 2160,
-                "max_images": 1,
-                "image_input": [],
-                "aspect_ratio": "4:3",
-                "sequential_image_generation": "disabled"
-            }
-        }),
-    )
-    .await?;
-
-    let img_data = client.get(&result_url).send().await?.bytes().await?;
-    let img = ImageReader::new(Cursor::new(img_data))
-        .with_guessed_format()?
-        .decode()?;
-
-    Ok((result_url, img))
-}
-
-async fn replicate_request_prediction(
-    client: &Client,
-    api_token: &str,
-    url: &str,
-    input_json: &serde_json::Value,
-) -> Result<String> {
-    let auth_header = format!("Bearer {api_token}");
+/// <https://openrouter.ai/bytedance-seed/seedream-4.5>
+async fn image_diffusion(client: &Client, prompt: &str) -> Result<DynamicImage> {
     let response = client
-        .post(url)
-        .header("Authorization", &auth_header)
-        .header("Content-Type", "application/json")
-        .json(input_json)
+        .post("https://openrouter.ai/api/v1/responses")
+        .header(
+            "Authorization",
+            format!(
+                "Bearer {}",
+                env::var("OPENROUTER").expect("OPENROUTER environment variable not set")
+            ),
+        )
+        .json(&json!({
+            "model": "bytedance-seed/seedream-4.5",
+            "modalities": ["image"],
+            "input": prompt,
+            "image_config": {
+                "image_size": "4K",
+                "aspect_ratio": "16:9"
+            }
+        }))
         .send()
         .await?;
 
-    let response_json = response.json::<serde_json::Value>().await?;
-    let status_url = response_json["urls"]["get"]
-        .as_str()
-        .ok_or_else(|| anyhow!("No valid status URL found"))?
-        .to_string();
-
-    for _ in 0..TIMEOUT {
-        let status_response = client
-            .get(&status_url)
-            .header("Authorization", &auth_header)
-            .header("Content-Type", "application/json")
-            .send()
-            .await?;
-
-        let status_json = status_response.json::<serde_json::Value>().await?;
-
-        if status_json["status"] == "succeeded" {
-            let url = status_json["output"]
-                .as_str()
-                .or_else(|| status_json["output"].as_array()?.first()?.as_str());
-            if let Some(url) = url {
-                return Ok(url.to_string());
-            }
-        }
-
-        tokio::time::sleep(Duration::from_secs(1)).await;
+    if !response.status().is_success() {
+        return Err(anyhow!(
+            "Image generation failed {}: {}",
+            response.status(),
+            response.text().await?,
+        ));
     }
 
-    Err(anyhow!("Operation timed out or failed"))
+    // Decode and parse the image
+    ImageReader::new(Cursor::new(
+        general_purpose::STANDARD.decode(
+            response.json::<serde_json::Value>().await?["output"][0]["result"]
+                .as_str()
+                .ok_or_else(|| anyhow!("Image data missing from response"))?
+                .split("base64,")
+                .nth(1)
+                .ok_or_else(|| anyhow!("Malformed data URL string"))?,
+        )?,
+    ))
+    .with_guessed_format()?
+    .decode()
+    .map_err(|e| anyhow!(e))
 }

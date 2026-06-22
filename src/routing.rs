@@ -52,7 +52,7 @@ const NEW_WALLPAPER_INTERVAL: Duration = Duration::hours(12);
 async fn try_generate() {
     let id = Uuid::new_v4();
     if let Err(e) = generate_wallpaper_impl(None, id).await {
-        tracing::error!("generate failed: {e:?}");
+        error!("generate failed: {e:?}");
         remove_generation_event(id).await;
     }
 }
