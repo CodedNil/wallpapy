@@ -4,15 +4,15 @@ use crate::{
 };
 use anyhow::{Result, anyhow};
 use axum::{
-    http::{HeaderMap, HeaderValue, StatusCode},
-    response::IntoResponse,
+    body::Body,
+    http::{Request, StatusCode},
+    response::{IntoResponse, Response},
 };
 use base64::{Engine, engine::general_purpose};
 use chrono::{Timelike, Utc};
 use image::{
     DynamicImage, GenericImageView, ImageReader, codecs::avif::AvifEncoder, imageops::FilterType,
 };
-use itertools::Itertools;
 use reqwest::Client;
 use serde_json::json;
 use std::{
@@ -22,31 +22,25 @@ use std::{
     sync::LazyLock,
     time::Duration,
 };
-use tap::Tap;
 use tokio::fs;
+use tower_http::services::ServeFile;
 use tracing::{error, info};
 use uuid::Uuid;
 
 static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
 
-async fn serve_file(file_name: &str) -> Result<(StatusCode, HeaderMap, Vec<u8>), StatusCode> {
-    let path = database::WALLPAPERS_DIR.join(file_name);
-    let data = fs::read(&path).await.map_err(|e| {
-        error!("Failed to read image file {file_name:?}: {e:?}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-    let mime = mime_guess::from_path(&path).first_or_octet_stream();
-    let mut headers = HeaderMap::new();
-    if let Ok(v) = HeaderValue::from_str(mime.as_ref()) {
-        headers.insert("Content-Type", v);
-    }
-    if let Ok(v) = HeaderValue::from_str(&format!("inline; filename=\"{file_name}\"")) {
-        headers.insert("Content-Disposition", v);
-    }
-    Ok((StatusCode::OK, headers, data))
+async fn serve_wallpaper(file_name: &str) -> Result<Response, StatusCode> {
+    ServeFile::new(database::WALLPAPERS_DIR.join(file_name))
+        .try_call(Request::new(Body::empty()))
+        .await
+        .map(IntoResponse::into_response)
+        .map_err(|e| {
+            error!("Failed to serve image file {file_name:?}: {e:?}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
 }
 
-pub async fn latest() -> Result<impl IntoResponse, StatusCode> {
+pub async fn latest() -> Result<Response, StatusCode> {
     let Some(wallpaper) = database::get_latest_wallpaper().await.map_err(|e| {
         error!("db read error: {e:?}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -55,10 +49,10 @@ pub async fn latest() -> Result<impl IntoResponse, StatusCode> {
         error!("No wallpapers found");
         return Err(StatusCode::NOT_FOUND);
     };
-    serve_file(&wallpaper.image_file).await
+    serve_wallpaper(&wallpaper.image_file).await
 }
 
-pub async fn favourites() -> Result<impl IntoResponse, StatusCode> {
+pub async fn favourites() -> Result<Response, StatusCode> {
     let wallpapers =
         database::get_wallpapers_by_liked_state(&[LikedState::Liked, LikedState::Loved])
             .await
@@ -73,14 +67,15 @@ pub async fn favourites() -> Result<impl IntoResponse, StatusCode> {
 
     // Total hours since Unix epoch as the hash index
     let hour_seed = Utc::now().timestamp() / 3600;
-    let index =
-        (DefaultHasher::new().tap_mut(|h| hour_seed.hash(h)).finish() as usize) % wallpapers.len();
+    let mut hasher = DefaultHasher::new();
+    hour_seed.hash(&mut hasher);
+    let index = hasher.finish() as usize % wallpapers.len();
 
-    serve_file(&wallpapers[index].image_file).await
+    serve_wallpaper(&wallpapers[index].image_file).await
 }
 
-pub async fn smartget() -> Result<impl IntoResponse, StatusCode> {
-    let wallpapers =
+pub async fn smartget() -> Result<Response, StatusCode> {
+    let mut wallpapers =
         database::get_wallpapers_by_liked_state(&[LikedState::Liked, LikedState::Loved])
             .await
             .map_err(|e| {
@@ -94,18 +89,16 @@ pub async fn smartget() -> Result<impl IntoResponse, StatusCode> {
         _ => (0.0, 0.5),
     };
 
-    let wallpapers = wallpapers.into_iter().collect::<Vec<_>>().tap_mut(|v| {
-        // If we have a wallpaper with correct brightness range, filter down to just those
-        let has_match = v.iter().any(|w| {
+    // If we have a wallpaper with correct brightness range, filter down to just those.
+    let has_match = wallpapers.iter().any(|w| {
+        w.image_brightness >= brightness_range.0 && w.image_brightness <= brightness_range.1
+    });
+    if has_match {
+        wallpapers.retain(|w| {
             w.image_brightness >= brightness_range.0 && w.image_brightness <= brightness_range.1
         });
-        if has_match {
-            v.retain(|w| {
-                w.image_brightness >= brightness_range.0 && w.image_brightness <= brightness_range.1
-            });
-        }
-        v.sort_by_key(|w| w.id);
-    });
+    }
+    wallpapers.sort_by_key(|w| w.id);
 
     if wallpapers.is_empty() {
         return Err(StatusCode::NOT_FOUND);
@@ -113,10 +106,11 @@ pub async fn smartget() -> Result<impl IntoResponse, StatusCode> {
 
     // Total hours since Unix epoch as the hash index
     let hour_seed = now.timestamp() / 3600;
-    let index =
-        (DefaultHasher::new().tap_mut(|h| hour_seed.hash(h)).finish() as usize) % wallpapers.len();
+    let mut hasher = DefaultHasher::new();
+    hour_seed.hash(&mut hasher);
+    let index = hasher.finish() as usize % wallpapers.len();
 
-    serve_file(&wallpapers[index].image_file).await
+    serve_wallpaper(&wallpapers[index].image_file).await
 }
 
 pub async fn generate_wallpaper_impl(message: Option<String>, id: Uuid) -> Result<()> {
@@ -185,25 +179,31 @@ fn encode_avif(img: &DynamicImage, speed: u8, quality: u8) -> Result<Vec<u8>> {
 
 fn top_20_percent_brightness(img: &DynamicImage) -> f32 {
     let sample_rate = 25;
+    let mut histogram = [0usize; 256];
+    let mut samples = 0usize;
 
-    let mut sampled_brightness = img
-        .pixels()
-        .step_by(sample_rate)
-        .map(|(_, _, pixel)| {
-            let [r, g, b, _] = pixel.0;
-            let (r, g, b) = (
-                f32::from(r) / 255.0,
-                f32::from(g) / 255.0,
-                f32::from(b) / 255.0,
-            );
-            0.114f32.mul_add(b, 0.299f32.mul_add(r, 0.587f32 * g))
+    for (_, _, pixel) in img.pixels().step_by(sample_rate) {
+        let [r, g, b, _] = pixel.0;
+        let brightness = (77 * usize::from(r) + 150 * usize::from(g) + 29 * usize::from(b)) >> 8;
+        histogram[brightness] += 1;
+        samples += 1;
+    }
+
+    if samples == 0 {
+        return 0.0;
+    }
+
+    let target = samples * 4 / 5;
+    let mut seen = 0;
+    let brightness = histogram
+        .iter()
+        .enumerate()
+        .find_map(|(brightness, count)| {
+            seen += count;
+            (seen > target).then_some(brightness)
         })
-        .sorted_by(f32::total_cmp);
-
-    // Grab the 80th percentile item from the sorted iterator
-    let target_index = ((sampled_brightness.len() as f32) * 0.80) as usize;
-
-    sampled_brightness.nth(target_index).unwrap_or(0.0)
+        .unwrap_or(255);
+    brightness as f32 / 255.0
 }
 
 /// <https://openrouter.ai/bytedance-seed/seedream-4.5>

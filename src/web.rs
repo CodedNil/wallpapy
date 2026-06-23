@@ -431,7 +431,7 @@ fn WallpaperCard(w: WallpaperData, mut expanded_id: Signal<Option<Uuid>>) -> Ele
 
     let mut deleted = use_signal(|| false);
     let mut liked = use_signal(|| w.liked_state);
-    let mut comment = use_signal(|| w.comment.clone().unwrap_or_default());
+    let mut comment = use_signal(|| w.comment.unwrap_or_default());
     let mut hovered = use_signal(|| false);
     let mut open_anim = use_signal(|| false);
     let mut start_rect: Signal<Option<(f64, f64, f64, f64)>> = use_signal(|| None);
@@ -722,12 +722,6 @@ fn IconButton(
 ) -> Element {
     let mut hovered = use_signal(|| false);
     let mut pressed = use_signal(|| false);
-
-    let svg = svg.replacen(
-        "<svg ",
-        "<svg style=\"fill:currentColor;width:100%;height:100%;display:block;\" ",
-        1,
-    );
 
     rsx! {
         button {

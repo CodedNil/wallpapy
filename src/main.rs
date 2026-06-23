@@ -1,5 +1,8 @@
+#[cfg(any(feature = "web", feature = "server"))]
 mod common;
+#[cfg(any(feature = "web", feature = "server"))]
 mod server_functions;
+#[cfg(any(feature = "web", feature = "server"))]
 mod web;
 
 #[cfg(feature = "server")]
@@ -38,7 +41,6 @@ async fn server_run() {
     }
 
     database::init().await.unwrap();
-    std::fs::create_dir_all(&*database::WALLPAPERS_DIR).unwrap();
     tokio::spawn(server::start_server());
 
     let app = axum::Router::<FullstackState>::new()

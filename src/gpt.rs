@@ -6,14 +6,13 @@ use reqwest::{
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Value, json};
-use std::{env, error::Error, fmt::Write as _, sync::LazyLock};
-use tap::Tap;
+use std::{env, fmt::Write as _, sync::LazyLock};
 use tracing::{error, info};
 use uuid::Uuid;
 
 static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
 
-async fn llm_parse<T>(message: &str) -> Result<T, Box<dyn Error + Send + Sync>>
+async fn llm_parse<T>(message: &str) -> Result<T>
 where
     T: DeserializeOwned,
 {
@@ -45,12 +44,11 @@ where
         .await?;
 
     if !response.status().is_success() {
-        return Err(format!(
+        return Err(anyhow!(
             "Request failed {}: {}",
             response.status(),
             response.text().await?
-        )
-        .into());
+        ));
     }
 
     let response_json: Value = response.json().await?;
@@ -68,12 +66,12 @@ where
         .flatten()
         .find(|item| item["type"] == "output_text")
         .and_then(|item| item["text"].as_str())
-        .ok_or("Failed to extract output_text from response")?;
+        .ok_or_else(|| anyhow!("Failed to extract output_text from response"))?;
 
     // Get cost of the prompt
     let cost = response_json["usage"]["cost"]
         .as_f64()
-        .ok_or("Failed to extract cost from response")?;
+        .ok_or_else(|| anyhow!("Failed to extract cost from response"))?;
     info!(
         "[GENERATION] '{}' - cost: ${}",
         inner_text
@@ -85,7 +83,7 @@ where
     );
 
     serde_json::from_str(inner_text).map_err(|e| {
-        format!(
+        anyhow!(
             "Serialization failed: {e} - Output received: {}",
             inner_text
                 .replace('\n', " ")
@@ -93,7 +91,6 @@ where
                 .take(500)
                 .collect::<String>()
         )
-        .into()
     })
 }
 
@@ -103,31 +100,23 @@ async fn build_context() -> Result<String> {
         .inspect_err(|e| error!("Failed accessing database {e:?}"))
         .unwrap_or_default();
 
-    let timeline: Vec<(chrono::DateTime<chrono::Utc>, String)> = wallpapers
-        .iter()
-        .map(|w| {
-            let feedback = match w.liked_state {
-                LikedState::Loved => " [LOVED by user]",
-                LikedState::Liked => " [liked by user]",
-                LikedState::Disliked => " [disliked by user]",
-                LikedState::Neutral => "",
-            };
-            let mut entry = format!("• {}{}", w.shortened_prompt, feedback);
-            if let Some(note) = &w.comment {
-                let _ = write!(entry, "  user note: {note}");
-            }
-            (w.datetime, entry)
-        })
-        .collect::<Vec<_>>()
-        .tap_mut(|t| t.sort_by_key(|(dt, _)| *dt));
+    let mut recent = String::new();
+    for wallpaper in wallpapers.iter().take(50) {
+        if !recent.is_empty() {
+            recent.push('\n');
+        }
 
-    let recent: String = timeline
-        .iter()
-        .rev()
-        .take(50)
-        .map(|(_, s)| s.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
+        let feedback = match wallpaper.liked_state {
+            LikedState::Loved => " [LOVED by user]",
+            LikedState::Liked => " [liked by user]",
+            LikedState::Disliked => " [disliked by user]",
+            LikedState::Neutral => "",
+        };
+        let _ = write!(recent, "• {}{}", wallpaper.shortened_prompt, feedback);
+        if let Some(note) = &wallpaper.comment {
+            let _ = write!(recent, "  user note: {note}");
+        }
+    }
 
     Ok(recent)
 }

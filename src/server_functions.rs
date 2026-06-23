@@ -1,11 +1,9 @@
-use crate::common::{GenerationEvent, GenerationStage, LikedState, WallpaperData};
-use dioxus::{
-    fullstack::{ServerEvents, StatusCode},
-    prelude::*,
-};
-use std::{fmt::Display, time::Duration};
+use crate::common::{GenerationEvent, LikedState, WallpaperData};
+use dioxus::{fullstack::ServerEvents, prelude::*};
 use uuid::Uuid;
 
+#[cfg(feature = "server")]
+use crate::common::GenerationStage;
 #[cfg(feature = "server")]
 use crate::{
     database,
@@ -13,12 +11,18 @@ use crate::{
     server::{EVENTS_SENDER, GENERATION_EVENTS, remove_generation_event, update_generation_event},
 };
 #[cfg(feature = "server")]
+use dioxus::fullstack::StatusCode;
+#[cfg(feature = "server")]
+use std::{fmt::Display, time::Duration};
+#[cfg(feature = "server")]
 use tokio::sync::broadcast;
 
+#[cfg(feature = "server")]
 fn server_error(error: impl Display) -> ServerFnError {
     ServerFnError::new(error)
 }
 
+#[cfg(feature = "server")]
 fn not_found(error: impl Display) -> ServerFnError {
     ServerFnError::ServerError {
         message: error.to_string(),

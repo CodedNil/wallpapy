@@ -4,16 +4,13 @@ use crate::{
     image::generate_wallpaper_impl,
 };
 use chrono::{Duration, Utc};
-use std::{
-    collections::HashMap,
-    sync::{Arc, LazyLock},
-};
+use std::{collections::HashMap, sync::LazyLock};
 use tokio::sync::{Mutex, broadcast};
 use tracing::error;
 use uuid::Uuid;
 
-pub static GENERATION_EVENTS: LazyLock<Arc<Mutex<HashMap<Uuid, GenerationEvent>>>> =
-    LazyLock::new(|| Arc::new(Mutex::new(HashMap::new())));
+pub static GENERATION_EVENTS: LazyLock<Mutex<HashMap<Uuid, GenerationEvent>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub static EVENTS_SENDER: LazyLock<broadcast::Sender<Vec<GenerationEvent>>> =
     LazyLock::new(|| broadcast::channel(16).0);
