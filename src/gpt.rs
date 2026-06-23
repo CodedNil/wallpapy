@@ -1,9 +1,6 @@
 use crate::{common::LikedState, database};
 use anyhow::{Result, anyhow};
-use reqwest::{
-    Client,
-    header::{AUTHORIZATION, CONTENT_TYPE},
-};
+use reqwest::{Client, header::CONTENT_TYPE};
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use std::{env, fmt::Write as _, sync::LazyLock};
@@ -25,20 +22,16 @@ where
         },
     });
 
-    // Write payload to payload.json
-    let payload_str = serde_json::to_string_pretty(&payload).unwrap_or_default();
-    std::fs::write("target/payload.json", payload_str).ok();
+    #[cfg(debug_assertions)]
+    {
+        let payload_str = serde_json::to_string_pretty(&payload).unwrap_or_default();
+        std::fs::write("target/payload.json", payload_str).ok();
+    }
 
     let response = HTTP_CLIENT
         .post("https://openrouter.ai/api/v1/responses")
         .header(CONTENT_TYPE, "application/json")
-        .header(
-            AUTHORIZATION,
-            format!(
-                "Bearer {}",
-                env::var("OPENROUTER").expect("OPENROUTER not set")
-            ),
-        )
+        .bearer_auth(env::var("OPENROUTER").expect("OPENROUTER not set"))
         .json(&payload)
         .send()
         .await?;
@@ -53,9 +46,11 @@ where
 
     let response_json: Value = response.json().await?;
 
-    // Write output to output.json
-    let payload_str = serde_json::to_string_pretty(&response_json).unwrap_or_default();
-    std::fs::write("target/output.json", payload_str).ok();
+    #[cfg(debug_assertions)]
+    {
+        let payload_str = serde_json::to_string_pretty(&response_json).unwrap_or_default();
+        std::fs::write("target/output.json", payload_str).ok();
+    }
 
     // Scan through the output array to find the final output text
     let inner_text = response_json["output"]
@@ -95,13 +90,13 @@ where
 }
 
 async fn build_context() -> Result<String> {
-    let wallpapers = database::get_all_wallpapers()
+    let wallpapers = database::get_prompt_context(50)
         .await
         .inspect_err(|e| error!("Failed accessing database {e:?}"))
         .unwrap_or_default();
 
     let mut recent = String::new();
-    for wallpaper in wallpapers.iter().take(50) {
+    for wallpaper in wallpapers {
         if !recent.is_empty() {
             recent.push('\n');
         }

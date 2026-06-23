@@ -15,19 +15,20 @@ use image::{
 };
 use reqwest::Client;
 use serde_json::json;
-use std::{
-    env,
-    hash::{DefaultHasher, Hash, Hasher},
-    io::Cursor,
-    sync::LazyLock,
-    time::Duration,
-};
+use std::{env, io::Cursor, sync::LazyLock, time::Duration};
 use tokio::fs;
 use tower_http::services::ServeFile;
 use tracing::{error, info};
 use uuid::Uuid;
 
 static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
+
+fn hourly_index(timestamp: i64, len: usize) -> usize {
+    let mut x = u64::try_from(timestamp.div_euclid(3600)).unwrap_or_default();
+    x = (x ^ (x >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    ((x ^ (x >> 31)) as usize) % len
+}
 
 async fn serve_wallpaper(file_name: &str) -> Result<Response, StatusCode> {
     ServeFile::new(database::WALLPAPERS_DIR.join(file_name))
@@ -41,7 +42,7 @@ async fn serve_wallpaper(file_name: &str) -> Result<Response, StatusCode> {
 }
 
 pub async fn latest() -> Result<Response, StatusCode> {
-    let Some(wallpaper) = database::get_latest_wallpaper().await.map_err(|e| {
+    let Some(image_file) = database::get_latest_image_file().await.map_err(|e| {
         error!("db read error: {e:?}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?
@@ -49,12 +50,12 @@ pub async fn latest() -> Result<Response, StatusCode> {
         error!("No wallpapers found");
         return Err(StatusCode::NOT_FOUND);
     };
-    serve_wallpaper(&wallpaper.image_file).await
+    serve_wallpaper(&image_file).await
 }
 
 pub async fn favourites() -> Result<Response, StatusCode> {
     let wallpapers =
-        database::get_wallpapers_by_liked_state(&[LikedState::Liked, LikedState::Loved])
+        database::get_wallpaper_choices_by_liked_state(&[LikedState::Liked, LikedState::Loved])
             .await
             .map_err(|e| {
                 error!("db read error: {e:?}");
@@ -65,18 +66,13 @@ pub async fn favourites() -> Result<Response, StatusCode> {
         return Err(StatusCode::NOT_FOUND);
     }
 
-    // Total hours since Unix epoch as the hash index
-    let hour_seed = Utc::now().timestamp() / 3600;
-    let mut hasher = DefaultHasher::new();
-    hour_seed.hash(&mut hasher);
-    let index = hasher.finish() as usize % wallpapers.len();
-
+    let index = hourly_index(Utc::now().timestamp(), wallpapers.len());
     serve_wallpaper(&wallpapers[index].image_file).await
 }
 
 pub async fn smartget() -> Result<Response, StatusCode> {
     let mut wallpapers =
-        database::get_wallpapers_by_liked_state(&[LikedState::Liked, LikedState::Loved])
+        database::get_wallpaper_choices_by_liked_state(&[LikedState::Liked, LikedState::Loved])
             .await
             .map_err(|e| {
                 error!("db read error: {e:?}");
@@ -104,12 +100,7 @@ pub async fn smartget() -> Result<Response, StatusCode> {
         return Err(StatusCode::NOT_FOUND);
     }
 
-    // Total hours since Unix epoch as the hash index
-    let hour_seed = now.timestamp() / 3600;
-    let mut hasher = DefaultHasher::new();
-    hour_seed.hash(&mut hasher);
-    let index = hasher.finish() as usize % wallpapers.len();
-
+    let index = hourly_index(now.timestamp(), wallpapers.len());
     serve_wallpaper(&wallpapers[index].image_file).await
 }
 
@@ -210,13 +201,7 @@ fn top_20_percent_brightness(img: &DynamicImage) -> f32 {
 async fn image_diffusion(client: &Client, prompt: &str) -> Result<DynamicImage> {
     let response = client
         .post("https://openrouter.ai/api/v1/responses")
-        .header(
-            "Authorization",
-            format!(
-                "Bearer {}",
-                env::var("OPENROUTER").expect("OPENROUTER environment variable not set")
-            ),
-        )
+        .bearer_auth(env::var("OPENROUTER").expect("OPENROUTER environment variable not set"))
         .json(&json!({
             "model": "bytedance-seed/seedream-4.5",
             "modalities": ["image"],

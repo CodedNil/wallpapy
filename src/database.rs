@@ -69,11 +69,24 @@ pub async fn init() -> Result<()> {
     Ok(())
 }
 
-/// Get all wallpapers, including Disliked ones (for prompt context).
-pub async fn get_all_wallpapers() -> Result<Vec<WallpaperData>, sqlx::Error> {
-    sqlx::query_as("SELECT * FROM wallpapers ORDER BY datetime DESC")
-        .fetch_all(pool())
-        .await
+#[derive(sqlx::FromRow)]
+pub struct PromptContext {
+    pub shortened_prompt: String,
+    pub liked_state: LikedState,
+    pub comment: Option<String>,
+}
+
+/// Get recent wallpaper context for prompt generation.
+pub async fn get_prompt_context(limit: i64) -> Result<Vec<PromptContext>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT shortened_prompt, liked_state, comment
+         FROM wallpapers
+         ORDER BY datetime DESC
+         LIMIT ?",
+    )
+    .bind(limit)
+    .fetch_all(pool())
+    .await
 }
 
 /// Get wallpapers for the gallery — excludes Disliked.
@@ -87,10 +100,10 @@ pub async fn get_gallery_wallpapers() -> Result<Vec<WallpaperData>, sqlx::Error>
     .await
 }
 
-/// Get the most recently created wallpaper.
-pub async fn get_latest_wallpaper() -> Result<Option<WallpaperData>, sqlx::Error> {
-    sqlx::query_as(
-        "SELECT * FROM wallpapers
+/// Get the most recently created wallpaper image file.
+pub async fn get_latest_image_file() -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT image_file FROM wallpapers
          WHERE liked_state != 'Disliked'
          ORDER BY datetime DESC
          LIMIT 1",
@@ -198,14 +211,22 @@ pub async fn update_comment(id: Uuid, comment: Option<&str>) -> Result<bool> {
     Ok(affected > 0)
 }
 
-/// Return all wallpapers whose `liked_state` is in the given set.
-pub async fn get_wallpapers_by_liked_state(
+#[derive(sqlx::FromRow)]
+pub struct WallpaperChoice {
+    pub id: Uuid,
+    pub image_file: String,
+    pub image_brightness: f32,
+}
+
+/// Get image selection data whose `liked_state` is in the given set.
+pub async fn get_wallpaper_choices_by_liked_state(
     states: &[LikedState],
-) -> Result<Vec<WallpaperData>, sqlx::Error> {
+) -> Result<Vec<WallpaperChoice>, sqlx::Error> {
     if states.is_empty() {
         return Ok(Vec::new());
     }
-    let mut query = QueryBuilder::<Sqlite>::new("SELECT * FROM wallpapers");
+    let mut query =
+        QueryBuilder::<Sqlite>::new("SELECT id, image_file, image_brightness FROM wallpapers");
     query.push(" WHERE liked_state IN (");
     let mut separated = query.separated(", ");
     for state in states {
