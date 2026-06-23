@@ -1,6 +1,6 @@
 use crate::{
     common::{GenerationStage, LikedState, WallpaperData},
-    database, gpt, routing,
+    database, gpt, server,
 };
 use anyhow::{Result, anyhow};
 use axum::{
@@ -122,7 +122,7 @@ pub async fn smartget() -> Result<impl IntoResponse, StatusCode> {
 pub async fn generate_wallpaper_impl(message: Option<String>, id: Uuid) -> Result<()> {
     info!("Generating wallpaper");
 
-    routing::update_generation_event(id, GenerationStage::WaitingForPrompt).await;
+    server::update_generation_event(id, GenerationStage::WaitingForPrompt).await;
 
     let datetime = Utc::now();
     let client = &*HTTP_CLIENT;
@@ -130,7 +130,7 @@ pub async fn generate_wallpaper_impl(message: Option<String>, id: Uuid) -> Resul
     let prompt_data = gpt::generate(message).await?;
     info!("Generated prompt: {}", prompt_data.prompt);
 
-    routing::update_generation_event(
+    server::update_generation_event(
         id,
         GenerationStage::ReceivedPrompt {
             prompt: prompt_data.prompt.clone(),
@@ -167,10 +167,10 @@ pub async fn generate_wallpaper_impl(message: Option<String>, id: Uuid) -> Resul
     };
 
     database::insert_wallpaper(wallpaper).await?;
-    routing::update_generation_event(id, GenerationStage::ReceivedImage).await;
+    server::update_generation_event(id, GenerationStage::ReceivedImage).await;
 
     tokio::time::sleep(Duration::from_secs(5)).await;
-    routing::remove_generation_event(id).await;
+    server::remove_generation_event(id).await;
 
     Ok(())
 }

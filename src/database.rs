@@ -1,14 +1,13 @@
 use crate::common::{LikedState, WallpaperData};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use itertools::Itertools;
 use sqlx::{
-    SqlitePool,
+    QueryBuilder, Sqlite, SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
 };
 use std::{
     env,
-    path::PathBuf,
+    path::{Path, PathBuf},
     str::FromStr,
     sync::{LazyLock, OnceLock},
 };
@@ -25,17 +24,34 @@ fn pool() -> &'static SqlitePool {
         .expect("Database has not been initialised; call database::init first")
 }
 
+fn sqlite_file_path(database_url: &str) -> Option<&Path> {
+    database_url
+        .strip_prefix("sqlite://")
+        .filter(|path| *path != ":memory:")
+        .map(|path| path.split_once('?').map_or(path, |(path, _)| path))
+        .map(Path::new)
+}
+
 /// Initialise the database pool and run pending migrations.
 pub async fn init() -> Result<()> {
     let database_url = env::var("DATABASE_URL")
         .unwrap_or_else(|_| format!("sqlite://{}", DATA_DIR.join("wallpapy.db").display()));
-    if let Some(path) = database_url.strip_prefix("sqlite://")
-        && path != ":memory:"
-        && let Some(parent) = std::path::Path::new(path).parent()
+    if let Some(path) = sqlite_file_path(&database_url)
+        && let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
-        tokio::fs::create_dir_all(parent).await?;
+        tokio::fs::create_dir_all(parent)
+            .await
+            .with_context(|| format!("Failed to create database directory {}", parent.display()))?;
     }
+    tokio::fs::create_dir_all(&*WALLPAPERS_DIR)
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to create wallpapers directory {}",
+                WALLPAPERS_DIR.display()
+            )
+        })?;
 
     let options = SqliteConnectOptions::from_str(&database_url)?
         .create_if_missing(true)
@@ -73,9 +89,14 @@ pub async fn get_gallery_wallpapers() -> Result<Vec<WallpaperData>, sqlx::Error>
 
 /// Get the most recently created wallpaper.
 pub async fn get_latest_wallpaper() -> Result<Option<WallpaperData>, sqlx::Error> {
-    sqlx::query_as("SELECT * FROM wallpapers ORDER BY datetime DESC LIMIT 1")
-        .fetch_optional(pool())
-        .await
+    sqlx::query_as(
+        "SELECT * FROM wallpapers
+         WHERE liked_state != 'Disliked'
+         ORDER BY datetime DESC
+         LIMIT 1",
+    )
+    .fetch_optional(pool())
+    .await
 }
 
 /// Get the datetime of the most recent wallpaper, or None if no wallpapers exist.
@@ -119,41 +140,43 @@ pub async fn insert_wallpaper(wallpaper: WallpaperData) -> Result<(), sqlx::Erro
     Ok(())
 }
 
-/// Update liked state for a wallpaper. Returns `true` if the row existed.
-pub async fn update_liked_state(id: Uuid, state: LikedState) -> Result<bool, sqlx::Error> {
-    let affected = sqlx::query("UPDATE wallpapers SET liked_state = ? WHERE id = ?")
+/// Update liked state for a wallpaper. Returns `true` if the row was updated.
+///
+/// `Disliked` is terminal: once set, future state changes are ignored. When a
+/// wallpaper first becomes disliked, its image file is removed from disk.
+pub async fn update_liked_state(id: Uuid, state: LikedState) -> Result<bool> {
+    if state == LikedState::Disliked {
+        if let Some(file_name) = sqlx::query_scalar::<Sqlite, String>(
+            "UPDATE wallpapers
+             SET liked_state = ?
+             WHERE id = ? AND liked_state != 'Disliked'
+             RETURNING image_file",
+        )
+        .bind(state)
+        .bind(id)
+        .fetch_optional(pool())
+        .await?
+        {
+            if let Err(e) = tokio::fs::remove_file(WALLPAPERS_DIR.join(file_name)).await
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                return Err(e).context("Failed to delete wallpaper file");
+            }
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    } else {
+        let affected = sqlx::query(
+            "UPDATE wallpapers SET liked_state = ? WHERE id = ? AND liked_state != 'Disliked'",
+        )
         .bind(state)
         .bind(id)
         .execute(pool())
         .await?
         .rows_affected();
-    Ok(affected > 0)
-}
-
-/// When a wallpaper is disliked, remove its file from disk but keep the row so
-/// it still appears in prompt context history.
-pub async fn dislike_and_remove_file(id: Uuid) -> Result<()> {
-    let file_name: Option<String> = sqlx::query_scalar(
-        "UPDATE wallpapers
-         SET liked_state = 'Disliked', image_file = NULL, image_width = NULL, image_height = NULL, image_brightness = NULL
-         WHERE id = ?
-         RETURNING image_file",
-    )
-    .bind(id)
-    .fetch_optional(pool())
-    .await?;
-
-    // Remove the file from disk.
-    if let Some(file_name) = file_name {
-        let file_path = WALLPAPERS_DIR.join(&file_name);
-        if let Err(e) = tokio::fs::remove_file(file_path).await
-            && e.kind() != std::io::ErrorKind::NotFound
-        {
-            return Err(e).context("Failed to delete wallpaper file");
-        }
+        Ok(affected > 0)
     }
-
-    Ok(())
 }
 
 /// Get the current liked state for a wallpaper.
@@ -182,13 +205,13 @@ pub async fn get_wallpapers_by_liked_state(
     if states.is_empty() {
         return Ok(Vec::new());
     }
-    let states_json = format!("[{}]", states.iter().map(|s| format!("\"{s}\"")).join(","));
-    sqlx::query_as(
-        "SELECT * FROM wallpapers
-         WHERE liked_state IN (SELECT value FROM json_each(?))
-         ORDER BY datetime DESC",
-    )
-    .bind(states_json)
-    .fetch_all(pool())
-    .await
+    let mut query = QueryBuilder::<Sqlite>::new("SELECT * FROM wallpapers");
+    query.push(" WHERE liked_state IN (");
+    let mut separated = query.separated(", ");
+    for state in states {
+        separated.push_bind(*state);
+    }
+    query.push(") ORDER BY datetime DESC");
+
+    query.build_query_as().fetch_all(pool()).await
 }

@@ -9,7 +9,7 @@ mod gpt;
 #[cfg(feature = "server")]
 mod image;
 #[cfg(feature = "server")]
-mod routing;
+mod server;
 
 fn main() {
     #[cfg(feature = "web")]
@@ -39,7 +39,7 @@ async fn server_run() {
 
     database::init().await.unwrap();
     std::fs::create_dir_all(&*database::WALLPAPERS_DIR).unwrap();
-    tokio::spawn(routing::start_server());
+    tokio::spawn(server::start_server());
 
     let app = axum::Router::<FullstackState>::new()
         .nest_service("/wallpapers", ServeDir::new(&*database::WALLPAPERS_DIR))

@@ -1,22 +1,37 @@
 use crate::common::{GenerationEvent, GenerationStage, LikedState, WallpaperData};
-use dioxus::{fullstack::ServerEvents, prelude::*};
-use std::time::Duration;
+use dioxus::{
+    fullstack::{ServerEvents, StatusCode},
+    prelude::*,
+};
+use std::{fmt::Display, time::Duration};
 use uuid::Uuid;
 
 #[cfg(feature = "server")]
 use crate::{
     database,
     image::generate_wallpaper_impl,
-    routing::{EVENTS_SENDER, GENERATION_EVENTS, remove_generation_event, update_generation_event},
+    server::{EVENTS_SENDER, GENERATION_EVENTS, remove_generation_event, update_generation_event},
 };
 #[cfg(feature = "server")]
 use tokio::sync::broadcast;
+
+fn server_error(error: impl Display) -> ServerFnError {
+    ServerFnError::new(error)
+}
+
+fn not_found(error: impl Display) -> ServerFnError {
+    ServerFnError::ServerError {
+        message: error.to_string(),
+        code: StatusCode::NOT_FOUND.as_u16(),
+        details: None,
+    }
+}
 
 #[get("/api/gallery")]
 pub async fn load_gallery_data() -> Result<Vec<WallpaperData>, ServerFnError> {
     database::get_gallery_wallpapers()
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))
+        .map_err(server_error)
 }
 
 #[get("/api/events")]
@@ -30,14 +45,13 @@ pub async fn stream_generation_events() -> Result<ServerEvents<Vec<GenerationEve
             return;
         }
         loop {
-            match rx.recv().await {
-                Ok(snapshot) => {
-                    if tx.send(snapshot).await.is_err() {
-                        break;
-                    }
-                }
-                Err(broadcast::error::RecvError::Lagged(_)) => {}
-                Err(broadcast::error::RecvError::Closed) => break,
+            let snapshot = match rx.recv().await {
+                Ok(snapshot) => snapshot,
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => return,
+            };
+            if tx.send(snapshot).await.is_err() {
+                return;
             }
         }
     }))
@@ -67,24 +81,19 @@ pub async fn action_generate(prompt: Option<String>) -> Result<(), ServerFnError
 pub async fn action_like(id: Uuid, state: LikedState) -> Result<(), ServerFnError> {
     let current = database::get_liked_state(id)
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?
-        .ok_or_else(|| ServerFnError::new("wallpaper not found".to_string()))?;
+        .map_err(server_error)?
+        .ok_or_else(|| not_found("wallpaper not found"))?;
 
-    let new_state = if current == state {
-        LikedState::Neutral
-    } else {
-        state
-    };
-
-    if new_state == LikedState::Disliked {
-        database::dislike_and_remove_file(id)
-            .await
-            .map_err(|e| ServerFnError::new(format!("dislike failed: {e:?}")))?;
-    } else {
-        database::update_liked_state(id, new_state)
-            .await
-            .map_err(|e| ServerFnError::new(format!("like failed: {e:?}")))?;
-    }
+    database::update_liked_state(
+        id,
+        if current == state {
+            LikedState::Neutral
+        } else {
+            state
+        },
+    )
+    .await
+    .map_err(|e| server_error(format!("like failed: {e:?}")))?;
 
     Ok(())
 }
@@ -94,10 +103,11 @@ pub async fn action_comment(id: Uuid, comment: Option<String>) -> Result<(), Ser
     let comment = comment.filter(|s| !s.trim().is_empty());
     let existed = database::update_comment(id, comment.as_deref())
         .await
-        .map_err(|e| ServerFnError::new(format!("comment failed: {e:?}")))?;
-    if !existed {
+        .map_err(|e| server_error(format!("comment failed: {e:?}")))?;
+    if existed {
+        Ok(())
+    } else {
         tracing::error!("set_image_comment: wallpaper not found {id}");
-        return Err(ServerFnError::new("wallpaper not found".to_string()));
+        Err(not_found("wallpaper not found"))
     }
-    Ok(())
 }
