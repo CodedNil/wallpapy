@@ -7,9 +7,9 @@ edition = "2024"
 dioxus = { version = "0.7.9", features = ["fullstack"] }
 
 tracing = "0.1.44"
-anyhow = "1.0.102"
+anyhow = "1.0.103"
 serde = { version = "1.0.228", features = ["derive"] }
-uuid = { version = "1.23.3", features = ["v4", "fast-rng", "serde", "js"] }
+uuid = { version = "1.23.4", features = ["v4", "fast-rng", "serde", "js"] }
 chrono = { version = "0.4.45", features = ["serde"] }
 gloo-timers = { version = "0.4.0", features = ["futures"] }
 strum = { version = "0.28.0", features = ["derive"] }
@@ -46,6 +46,7 @@ tower-http = { version = "0.7.0", features = [
 ] }
 image = { version = "0.25.10", default-features = false, features = [
     "jpeg",
+    "png",
     "webp",
     "avif",
     "rayon",

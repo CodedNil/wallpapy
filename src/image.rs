@@ -10,15 +10,14 @@ use axum::{
 };
 use base64::{Engine, engine::general_purpose};
 use chrono::{Timelike, Utc};
-use image::{
-    DynamicImage, GenericImageView, ImageReader, codecs::avif::AvifEncoder, imageops::FilterType,
-};
+use image::{DynamicImage, GenericImageView, ImageReader, codecs::avif::AvifEncoder};
 use reqwest::Client;
+use serde::Deserialize;
 use serde_json::json;
 use std::{env, io::Cursor, sync::LazyLock, time::Duration};
 use tokio::fs;
 use tower_http::services::ServeFile;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
@@ -124,18 +123,14 @@ pub async fn generate_wallpaper_impl(message: Option<String>, id: Uuid) -> Resul
     .await;
 
     let image = image_diffusion(client, &prompt_data.prompt).await?;
-    let image = image.resize_to_fill(3840, 2160, FilterType::Lanczos3);
-    info!("Generated image");
+    info!("Generated image {}x{}", image.width(), image.height());
 
     let datetime_str = datetime.to_rfc3339();
     let file_name = format!("{datetime_str}.avif");
-    fs::write(
-        database::WALLPAPERS_DIR.join(&file_name),
-        encode_avif(&image, 4, 80)?,
-    )
-    .await?;
+    let mut buffer = Vec::new();
+    image.write_with_encoder(AvifEncoder::new_with_speed_quality(&mut buffer, 2, 92))?;
+    fs::write(database::WALLPAPERS_DIR.join(&file_name), buffer).await?;
 
-    let small_image = image.resize_to_fill(640, 360, FilterType::Lanczos3);
     let wallpaper = WallpaperData {
         id,
         datetime,
@@ -145,7 +140,7 @@ pub async fn generate_wallpaper_impl(message: Option<String>, id: Uuid) -> Resul
         image_file: file_name,
         image_width: image.width(),
         image_height: image.height(),
-        image_brightness: top_20_percent_brightness(&small_image),
+        image_brightness: top_20_percent_brightness(&image),
 
         liked_state: LikedState::Neutral,
         comment: None,
@@ -158,14 +153,6 @@ pub async fn generate_wallpaper_impl(message: Option<String>, id: Uuid) -> Resul
     server::remove_generation_event(id).await;
 
     Ok(())
-}
-
-fn encode_avif(img: &DynamicImage, speed: u8, quality: u8) -> Result<Vec<u8>> {
-    let mut buf = Vec::new();
-    img.write_with_encoder(AvifEncoder::new_with_speed_quality(
-        &mut buf, speed, quality,
-    ))?;
-    Ok(buf)
 }
 
 fn top_20_percent_brightness(img: &DynamicImage) -> f32 {
@@ -197,19 +184,33 @@ fn top_20_percent_brightness(img: &DynamicImage) -> f32 {
     brightness as f32 / 255.0
 }
 
+#[derive(Deserialize)]
+struct ImageGenerationResponse {
+    data: Vec<GeneratedImage>,
+    usage: Option<ImageGenerationUsage>,
+}
+
+#[derive(Deserialize)]
+struct GeneratedImage {
+    b64_json: String,
+}
+
+#[derive(Deserialize)]
+struct ImageGenerationUsage {
+    cost: Option<f64>,
+}
+
 /// <https://openrouter.ai/bytedance-seed/seedream-4.5>
 async fn image_diffusion(client: &Client, prompt: &str) -> Result<DynamicImage> {
     let response = client
-        .post("https://openrouter.ai/api/v1/responses")
+        .post("https://openrouter.ai/api/v1/images")
         .bearer_auth(env::var("OPENROUTER").expect("OPENROUTER environment variable not set"))
         .json(&json!({
             "model": "bytedance-seed/seedream-4.5",
-            "modalities": ["image"],
-            "input": prompt,
-            "image_config": {
-                "image_size": "4K",
-                "aspect_ratio": "16:9"
-            }
+            "prompt": prompt,
+            "resolution": "4K",
+            "aspect_ratio": "16:9",
+            "n": 1,
         }))
         .send()
         .await?;
@@ -222,16 +223,21 @@ async fn image_diffusion(client: &Client, prompt: &str) -> Result<DynamicImage> 
         ));
     }
 
-    // Decode and parse the image
+    let response = response.json::<ImageGenerationResponse>().await?;
+    let cost = response.usage.and_then(|usage| usage.cost);
+    if let Some(cost) = cost {
+        info!("[IMAGE GENERATION] cost: ${cost}");
+    } else {
+        warn!("[IMAGE GENERATION] cost unavailable");
+    }
+
+    let image_data = response
+        .data
+        .first()
+        .ok_or_else(|| anyhow!("Image data missing from response"))?;
+
     ImageReader::new(Cursor::new(
-        general_purpose::STANDARD.decode(
-            response.json::<serde_json::Value>().await?["output"][0]["result"]
-                .as_str()
-                .ok_or_else(|| anyhow!("Image data missing from response"))?
-                .split("base64,")
-                .nth(1)
-                .ok_or_else(|| anyhow!("Malformed data URL string"))?,
-        )?,
+        general_purpose::STANDARD.decode(&image_data.b64_json)?,
     ))
     .with_guessed_format()?
     .decode()
