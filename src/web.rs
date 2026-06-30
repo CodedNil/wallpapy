@@ -437,6 +437,7 @@ fn WallpaperCard(w: WallpaperData, mut expanded_id: Signal<Option<Uuid>>) -> Ele
     let mut start_rect: Signal<Option<(f64, f64, f64, f64)>> = use_signal(|| None);
     let mut end_rect: Signal<Option<(f64, f64, f64, f64)>> = use_signal(|| None);
     let mut is_closing = use_signal(|| false);
+    let mut card_element = use_signal(|| None);
 
     let is_expanded = expanded_id() == Some(w.id);
     let is_active = is_expanded || is_closing();
@@ -497,6 +498,7 @@ fn WallpaperCard(w: WallpaperData, mut expanded_id: Signal<Option<Uuid>>) -> Ele
 
         div {
             id: "{w.id}",
+            onmounted: move |element| card_element.set(Some(element.data())),
             border_radius: "26px",
             overflow: "hidden",
             position: if is_active { "fixed" } else { "relative" },
@@ -517,31 +519,24 @@ fn WallpaperCard(w: WallpaperData, mut expanded_id: Signal<Option<Uuid>>) -> Ele
                 cursor: if is_active { "default" } else { "pointer" },
                 onmouseenter: move |_| hovered.set(true),
                 onmouseleave: move |_| hovered.set(false),
-                onclick: move |_| {
+                onclick: move |_| async move {
                     if !is_active {
-                        if let Some(window) = web_sys::window()
-                            && let Some(doc) = window.document()
-                            && let Some(elem) = doc.get_element_by_id(&w.id.to_string())
+                        if let Some(element) = card_element.cloned()
+                            && let Ok(r) = element.get_client_rect().await
+                            && let Ok((vw, vh)) = document::eval(
+                                "return [window.innerWidth, window.innerHeight]",
+                            )
+                            .join::<(f64, f64)>()
+                            .await
                         {
-                            let vw = window
-                                .inner_width()
-                                .ok()
-                                .and_then(|v| v.as_f64())
-                                .unwrap_or(1920.0);
-                            let vh = window
-                                .inner_height()
-                                .ok()
-                                .and_then(|v| v.as_f64())
-                                .unwrap_or(1080.0);
-                            let r = elem.get_bounding_client_rect();
-                            let sw = r.width();
-                            let sh = r.height();
+                            let sw = r.size.width;
+                            let sh = r.size.height;
                             let ew = f64::min(
                                 vw * 0.92,
-                                (vh * 0.92 - (sh - sw * 9.0 / 16.0)) * 16.0 / 9.0,
+                                vh.mul_add(0.92, -(sh - sw * 9.0 / 16.0)) * 16.0 / 9.0,
                             );
                             let eh = ew * 9.0 / 16.0 + (sh - sw * 9.0 / 16.0);
-                            start_rect.set(Some((r.top(), r.left(), sw, sh)));
+                            start_rect.set(Some((r.origin.y, r.origin.x, sw, sh)));
                             end_rect.set(Some(((vh - eh) / 2.0, (vw - ew) / 2.0, ew, eh)));
                         }
                         expanded_id.set(Some(w.id));
@@ -622,17 +617,17 @@ fn WallpaperCard(w: WallpaperData, mut expanded_id: Signal<Option<Uuid>>) -> Ele
                             color: like_color(liked()),
                             text: if is_active { "{w.prompt}" } else { "{w.shortened_prompt}" },
                             onclick: move |_| {
-                                if let Some(window) = web_sys::window() {
-                                    let _ = window
-                                        .navigator()
-                                        .clipboard()
-                                        .write_text(
-                                            if is_active {
-                                                &w.prompt
-                                            } else {
-                                                &w.shortened_prompt
-                                            },
-                                        );
+                                let text = if is_active {
+                                    w.prompt.clone()
+                                } else {
+                                    w.shortened_prompt.clone()
+                                };
+                                async move {
+                                    let eval = document::eval(
+                                        "navigator.clipboard.writeText(await dioxus.recv())",
+                                    );
+                                    let _ = eval.send(text);
+                                    let _ = eval.await;
                                 }
                             },
                         }

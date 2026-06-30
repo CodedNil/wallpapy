@@ -11,19 +11,10 @@ anyhow = "1.0.103"
 serde = { version = "1.0.228", features = ["derive"] }
 uuid = { version = "1.23.4", features = ["v4", "fast-rng", "serde", "js"] }
 chrono = { version = "0.4.45", features = ["serde"] }
-gloo-timers = { version = "0.4.0", features = ["futures"] }
+time = "=0.3.36"
 strum = { version = "0.28.0", features = ["derive"] }
 
-wasm-bindgen = "=0.2.118"
-web-sys = { version = "=0.3.95", features = [
-    "Window",
-    "Navigator",
-    "Clipboard",
-    "Document",
-    "Element",
-    "HtmlElement",
-    "DomRect",
-] }
+gloo-timers = { version = "=0.3.0", features = ["futures"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 sqlx = { version = "0.9.0", default-features = false, features = [
@@ -36,7 +27,10 @@ sqlx = { version = "0.9.0", default-features = false, features = [
 ] }
 dotenvy = "0.15.7"
 serde_json = "1.0.150"
-reqwest = { version = "0.13.4", features = ["json"] }
+reqwest = { version = "=0.12.28", default-features = false, features = [
+    "json",
+    "rustls-tls",
+] }
 tokio = { version = "1.52.3", features = ["full"] }
 axum = { version = "0.8.9", features = ["http1", "tokio"] }
 tower-http = { version = "0.7.0", features = [
